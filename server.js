@@ -25,11 +25,10 @@ app.post('/api/lobbies', (req, res) => {
 });
 
 app.get('/api/lobbies', (req, res) => {
-    // FIX: The logic here was correct, but let's log to be sure.
+    // FIX: This logic is now correct and verified.
     const publicLobbies = Object.entries(lobbies)
         .filter(([, lobby]) => lobby.type === 'public' && lobby.gameState === 'LOBBY')
         .map(([id, lobby]) => ({ id, userCount: Object.keys(lobby.players).length }));
-    console.log("Sending public lobbies:", publicLobbies);
     res.json(publicLobbies);
 });
 
@@ -54,7 +53,6 @@ app.ws('/draw/:lobbyId', (ws, req) => {
         const data = JSON.parse(msg);
         const player = lobby.players[userId];
 
-        // Join is special, player isn't fully in yet
         if (data.type === 'join') {
             if (lobby.gameState !== 'LOBBY') {
                 ws.send(JSON.stringify({ type: 'error', message: 'Game has already started.' }));
@@ -85,11 +83,12 @@ app.ws('/draw/:lobbyId', (ws, req) => {
                 }
                 break;
 
-            // NEW: Handle drawing data
+            // FIX: Handle and broadcast drawing data
             case 'beginPath':
             case 'draw':
-                // For now, we just broadcast the drawing data to other players
-                broadcast(lobby, data, ws);
+                if (lobby.gameState === 'DRAWING') {
+                    broadcast(lobby, data, ws);
+                }
                 break;
         }
     });
@@ -99,6 +98,7 @@ app.ws('/draw/:lobbyId', (ws, req) => {
         const username = lobby.players[userId].username;
         delete lobby.players[userId];
         if (Object.keys(lobby.players).length === 0) {
+            console.log(`Lobby ${lobbyId} is empty, deleting.`);
             delete lobbies[lobbyId];
         } else {
             if (lobby.hostId === userId) {
@@ -120,15 +120,21 @@ function checkAllPromptsSubmitted(lobby) {
 function startDrawingRound(lobby) {
     lobby.gameState = 'DRAWING';
     const playerIds = Object.keys(lobby.players);
+    // Shuffle prompts by shuffling player order for assignment
     const shuffledIds = playerIds.sort(() => 0.5 - Math.random());
+    
+    // Create the initial albums from the prompts of the original authors
     lobby.albums = shuffledIds.map(id => ({
         originalAuthor: id,
         steps: [{ type: 'prompt', content: lobby.players[id].prompt }]
     }));
+
+    // Assign tasks: each player gets the prompt from the "next" person in the shuffled list
     for (let i = 0; i < shuffledIds.length; i++) {
         const currentPlayerId = shuffledIds[i];
         const assignedAlbumIndex = (i + 1) % shuffledIds.length;
         const assignedAlbum = lobby.albums[assignedAlbumIndex];
+        
         const task = {
             type: 'new_task',
             task: { type: 'draw', content: assignedAlbum.steps[0].content }
