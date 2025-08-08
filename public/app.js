@@ -40,9 +40,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- View Management ---
     function showView(viewName) {
-        Object.values(views).forEach(view => view.style.display = 'none');
-        if(views[viewName]) {
-            views[viewName].style.display = 'flex';
+        for (const key in views) {
+            views[key].classList.add('hidden');
+        }
+        if (views[viewName]) {
+            views[viewName].classList.remove('hidden');
         }
     }
 
@@ -50,7 +52,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function fetchPublicLobbies() {
         try {
             const response = await fetch('/api/lobbies');
-            if (!response.ok) throw new Error('Failed to fetch');
+            if (!response.ok) throw new Error('Failed to fetch lobbies');
             const lobbies = await response.json();
             publicLobbyList.innerHTML = '';
             if (lobbies.length === 0) {
@@ -86,27 +88,25 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             console.log(`[CLIENT] Received response with status: ${response.status}`);
+            const data = await response.json();
 
             if (response.ok) {
-                const data = await response.json();
                 console.log('[CLIENT] Successfully parsed response data:', data);
-
                 if (data.lobbyId) {
                     currentLobbyId = data.lobbyId;
-                    views.createModal.style.display = 'none';
+                    views.createModal.classList.add('hidden');
                     showView('usernameModal');
                 } else {
-                    console.error('[CLIENT] Response was OK, but no lobbyId was found in data.');
-                    alert('An unexpected server error occurred: Lobby ID was not returned.');
+                    console.error('[CLIENT] Response was OK, but no lobbyId was found.');
+                    alert('An unexpected server error occurred.');
                 }
             } else {
-                const errorData = await response.json();
-                console.error(`[CLIENT] Server responded with an error: ${response.status}`, errorData);
-                alert(`Failed to create lobby. The server said: ${errorData.message}`);
+                console.error(`[CLIENT] Server responded with an error: ${response.status}`, data);
+                alert(`Failed to create lobby: ${data.message || 'Unknown error'}`);
             }
         } catch (error) {
             console.error('[CLIENT] A network error occurred:', error);
-            alert('A network error occurred. Please check your connection and the developer console for more info.');
+            alert('A network error occurred. Please check your connection.');
         } finally {
             button.disabled = false;
             button.textContent = originalText;
@@ -171,7 +171,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function startDrawing(e) {
         isDrawing = true;
         const { x, y } = getMousePos(e);
-        const command = { type: 'beginPath', x: x, y: y, color: colorPicker.value, size: brushSize.value };
+        const command = { type: 'beginPath', x, y, color: colorPicker.value, size: brushSize.value };
         ws.send(JSON.stringify(command));
         canvasHistory.push(command);
         drawFromData(command);
@@ -180,7 +180,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function draw(e) {
         if (!isDrawing) return;
         const { x, y } = getMousePos(e);
-        const command = { type: 'draw', x: x, y: y };
+        const command = { type: 'draw', x, y };
         ws.send(JSON.stringify(command));
         canvasHistory.push(command);
         drawFromData(command);
@@ -216,11 +216,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- ATTACH ALL EVENT LISTENERS ---
     showCreateLobbyBtn.addEventListener('click', () => {
-        views.createModal.style.display = 'flex';
+        console.log('Button clicked: "Create a New Lobby". Opening modal...');
+        views.createModal.classList.remove('hidden');
     });
 
     cancelCreateBtn.addEventListener('click', () => {
-        views.createModal.style.display = 'none';
+        views.createModal.classList.add('hidden');
     });
 
     createBtns.forEach(btn => {
@@ -272,15 +273,15 @@ document.addEventListener('DOMContentLoaded', () => {
         setCanvasSize();
         connectWebSocket(username, currentLobbyId);
     });
-    
+
     canvas.addEventListener('mousedown', startDrawing);
     canvas.addEventListener('mousemove', draw);
     canvas.addEventListener('mouseup', stopDrawing);
     canvas.addEventListener('mouseout', stopDrawing);
     brushSize.addEventListener('input', () => brushSizeValue.textContent = brushSize.value);
-    
+
     window.addEventListener('resize', () => {
-        if (views.app.style.display === 'flex') {
+        if (!views.app.classList.contains('hidden')) {
             setCanvasSize();
             redrawCanvas(canvasHistory);
         }
