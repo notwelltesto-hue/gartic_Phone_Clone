@@ -13,10 +13,46 @@
 <body>
 
     <div id="app-root">
-        <!-- Home Screen, Create Modal, Username Modal are the same as before -->
-        <div id="home-screen" class="view"> <!-- ... --> </div>
-        <div id="create-lobby-modal" class="modal-container hidden"> <!-- ... --> </div>
-        <div id="username-modal" class="modal-container hidden"> <!-- ... --> </div>
+        <!-- Home Screen -->
+        <div id="home-screen" class="view">
+             <div class="home-container">
+                <h1>Welcome to DrawHub</h1>
+                <p>The collaborative drawing game.</p>
+                <div class="home-actions">
+                    <button id="show-create-lobby-btn">Create a New Lobby</button>
+                    <div class="join-private">
+                        <input type="text" id="private-lobby-code" placeholder="Enter lobby code...">
+                        <button id="join-private-btn">Join</button>
+                    </div>
+                </div>
+                <div class="public-lobbies">
+                    <h2>Public Lobbies</h2>
+                    <ul id="public-lobby-list"></ul>
+                    <button id="refresh-lobbies-btn">Refresh List</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Create Lobby Modal -->
+        <div id="create-lobby-modal" class="modal-container hidden">
+            <div class="modal-content">
+                <h2>Create a Lobby</h2>
+                <div class="modal-actions">
+                    <button class="create-btn" data-type="public">Create Public</button>
+                    <button class="create-btn" data-type="private">Create Private</button>
+                </div>
+                <button id="cancel-create-btn">Cancel</button>
+            </div>
+        </div>
+
+        <!-- Username Modal -->
+        <div id="username-modal" class="modal-container hidden">
+            <div class="modal-content">
+                <h2>Choose Your Username</h2>
+                <input type="text" id="username-input" placeholder="Your Username" maxlength="15">
+                <button id="join-lobby-btn">Enter Lobby</button>
+            </div>
+        </div>
 
         <!-- Main Game Container -->
         <div id="game-container" class="view hidden">
