@@ -77,6 +77,13 @@ document.addEventListener('DOMContentLoaded', () => {
     function setCanvasSize() {
         const dpr = window.devicePixelRatio || 1;
         const rect = gameCanvas.parentElement.getBoundingClientRect();
+
+        // Defensive check: if the container has no size, don't do anything.
+        if (rect.width === 0 || rect.height === 0) {
+            console.warn("Canvas parent has no size. Aborting resize.");
+            return;
+        }
+
         const size = Math.min(rect.width - 40, rect.height - 40, 900);
         gameCanvas.width = size * dpr;
         gameCanvas.height = size * dpr;
@@ -88,6 +95,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderGameCanvas() {
         const w = gameCanvas.width / window.devicePixelRatio;
         const h = gameCanvas.height / window.devicePixelRatio;
+        if (!w || !h) return; // Don't render if canvas has no size
         ctx.clearRect(0, 0, w, h);
         
         switch (clientGameState) {
@@ -197,14 +205,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 lobbyCodeDisplay.textContent = currentLobbyId;
                 clientGameState = 'LOBBY';
                 showView('game');
-                
+
                 // --- THE FIX ---
-                // We defer sizing and rendering. This gives the browser a moment
-                // to make the view visible, ensuring we get the correct dimensions.
-                setTimeout(() => {
+                // We use requestAnimationFrame to ensure the browser has finished
+                // its layout calculations before we try to size the canvas.
+                requestAnimationFrame(() => {
                     setCanvasSize();
                     renderGameCanvas();
-                }, 0);
+                });
                 // --- END FIX ---
 
                 updatePlayerList();
@@ -269,6 +277,18 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    window.addEventListener('resize', () => {
+        if (clientGameState !== 'HOME') {
+            // Also use the robust method on resize
+            requestAnimationFrame(() => {
+                setCanvasSize();
+                renderGameCanvas();
+            });
+        }
+    });
+
+    setInterval(() => { if (clientGameState === 'PROMPTING' && !promptSubmitted) renderGameCanvas() }, 500);
+
     // --- Home Screen & Modal Logic ---
     showCreateLobbyBtn.addEventListener('click', () => createLobbyModal.classList.remove('hidden'));
     cancelCreateBtn.addEventListener('click', () => createLobbyModal.classList.add('hidden'));
@@ -304,13 +324,6 @@ document.addEventListener('DOMContentLoaded', () => {
         usernameModal.classList.add('hidden');
         connectWebSocket(username, currentLobbyId);
     });
-    window.addEventListener('resize', () => {
-        if(clientGameState !== 'HOME') {
-            setCanvasSize();
-            renderGameCanvas();
-        }
-    });
-    setInterval(() => { if (clientGameState === 'PROMPTING' && !promptSubmitted) renderGameCanvas() }, 500);
 
     // --- Initial Setup ---
     showView('home');
