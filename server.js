@@ -9,30 +9,18 @@ app.use(express.static('public'));
 const wsInstance = expressWs(app);
 
 // --- Server State: Manages multiple lobbies ---
-// The 'lobbies' object is now the single source of truth.
 const lobbies = {};
-/*
-Lobby structure:
-{
-  'lobbyId': {
-    type: 'public' | 'private',
-    users: { 'userId': 'username' },
-    canvasHistory: [],
-    // Note: The 'clients' set is managed by express-ws implicitly
-  }
-}
-*/
 
 // --- HTTP Routes for Lobby Management ---
 
 // 1. Create a new lobby
 app.post('/api/lobbies', (req, res) => {
-    const { type } = req.body; // Expects { "type": "public" | "private" }
+    const { type } = req.body;
     if (type !== 'public' && type !== 'private') {
         return res.status(400).json({ message: 'Invalid lobby type.' });
     }
 
-    const lobbyId = short.generate(); // Generate a friendly, short ID
+    const lobbyId = short.generate();
     lobbies[lobbyId] = {
         type: type,
         users: {},
@@ -53,15 +41,23 @@ app.get('/api/lobbies', (req, res) => {
     res.json(publicLobbies);
 });
 
+// 3. NEW: A route to check if a specific lobby exists
+app.get('/api/lobbies/:lobbyId', (req, res) => {
+    const { lobbyId } = req.params;
+    if (lobbies[lobbyId]) {
+        res.status(200).json({ message: 'Lobby exists.' });
+    } else {
+        res.status(404).json({ message: 'Lobby not found.' });
+    }
+});
+
+
 // --- WebSocket Route for Drawing in a Lobby ---
-// The URL now includes the specific lobby ID to join.
 app.ws('/draw/:lobbyId', (ws, req) => {
     const { lobbyId } = req.params;
     const lobby = lobbies[lobbyId];
 
-    // If lobby doesn't exist, close connection
     if (!lobby) {
-        console.log(`Connection rejected for non-existent lobby: ${lobbyId}`);
         ws.close();
         return;
     }
@@ -71,29 +67,27 @@ app.ws('/draw/:lobbyId', (ws, req) => {
 
     ws.on('message', (msg) => {
         const data = JSON.parse(msg);
-        const currentLobby = lobbies[lobbyId]; // Ensure we're always acting on the correct lobby
+        const currentLobby = lobbies[lobbyId];
 
         if (data.type === 'join') {
             currentLobby.users[userId] = data.username;
             console.log(`${data.username} joined lobby ${lobbyId}`);
 
-            // Send history and user list to the new user
             ws.send(JSON.stringify({
                 type: 'initial_state',
                 canvasHistory: currentLobby.canvasHistory,
                 users: currentLobby.users
             }));
 
-            // Notify everyone else in the same lobby
             broadcastToLobby(lobbyId, {
                 type: 'user_joined',
                 userId: userId,
                 username: data.username
-            }, ws); // Exclude the sender
+            }, ws);
         }
         else if (data.type === 'beginPath' || data.type === 'draw') {
             currentLobby.canvasHistory.push(data);
-            broadcastToLobby(lobbyId, data, ws); // Broadcast drawing to the lobby
+            broadcastToLobby(lobbyId, data, ws);
         }
     });
 
@@ -107,13 +101,13 @@ app.ws('/draw/:lobbyId', (ws, req) => {
     });
 });
 
-// Helper function to broadcast messages to a specific lobby
 function broadcastToLobby(lobbyId, message, excludeWs) {
     const messageStr = JSON.stringify(message);
-    // Iterate through all clients on the server
+    const lobby = lobbies[lobbyId];
+    if (!lobby) return;
+
     wsInstance.getWss().clients.forEach(client => {
-        // Check if the client is in our target lobby and isn't the excluded client
-        if (client.readyState === client.OPEN && lobbies[lobbyId]?.users[client.id] && client !== excludeWs) {
+        if (client.readyState === client.OPEN && lobby.users[client.id] && client !== excludeWs) {
             client.send(messageStr);
         }
     });
