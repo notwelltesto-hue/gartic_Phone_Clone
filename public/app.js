@@ -8,7 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentPromptText = '', promptSubmitted = false;
     let isDrawing = false, lastX = 0, lastY = 0;
     let roundEndTime = 0, timerInterval;
-    let drawingHistory = []; // Stores drawing commands for the current turn
+    let drawingHistory = [];
     let revealData = { albums: [], albumIndex: 0, stepIndex: 0 };
     let animationState = { isAnimating: false, commands: [], index: 0, reqId: null };
     let lastBlinkTime = 0, cursorVisible = true;
@@ -36,55 +36,49 @@ document.addEventListener('DOMContentLoaded', () => {
     const refreshLobbiesBtn = document.getElementById('refresh-lobbies-btn');
 
     // --- Dynamic UI Creation ---
-    function createDynamicElement(tag, id, parent) {
-        let el = document.getElementById(id);
-        if (!el) { el = document.createElement(tag); el.id = id; parent.appendChild(el); }
-        return el;
-    }
+    function createDynamicElement(tag, id, parent) { let el = document.getElementById(id); if (!el) { el = document.createElement(tag); el.id = id; parent.appendChild(el); } return el; }
     const doneButton = createDynamicElement('button', 'done-button', mainContent);
     const timerDisplay = createDynamicElement('div', 'timer-display', mainContent);
     const progressBar = createDynamicElement('div', 'reveal-progress-bar', mainContent);
     const progressFill = createDynamicElement('div', 'reveal-progress-fill', progressBar);
     
     // --- Text-to-Speech ---
-    function speak(text) {
-        if ('speechSynthesis' in window) {
-            speechSynthesis.cancel();
-            const utterance = new SpeechSynthesisUtterance(text);
-            speechSynthesis.speak(utterance);
-        }
-    }
+    function speak(text) { if ('speechSynthesis' in window && text) { speechSynthesis.cancel(); const utterance = new SpeechSynthesisUtterance(text); speechSynthesis.speak(utterance); } }
 
     // --- Drawing Animation Engine ---
-    function animateDrawing() {
-        if (!animationState.isAnimating) return;
-        const commands = animationState.commands;
-        if (animationState.index >= commands.length) {
-            animationState.isAnimating = false;
-            return;
-        }
-        // Draw a few commands per frame for speed
-        for (let i = 0; i < 3; i++) {
-            if (animationState.index >= commands.length) break;
-            const cmd = commands[animationState.index];
-            if (cmd.type === 'beginPath') drawLine(cmd.x - 0.01, cmd.y, cmd.x, cmd.y, cmd.color, cmd.size);
-            else if (cmd.type === 'draw') drawLine(cmd.x0, cmd.y0, cmd.x1, cmd.y1, cmd.color, cmd.size);
-            animationState.index++;
-        }
-        progressFill.style.width = `${(animationState.index / commands.length) * 100}%`;
-        animationState.reqId = requestAnimationFrame(animateDrawing);
+    function animateDrawing() { if (!animationState.isAnimating) return; const commands = animationState.commands; if (animationState.index >= commands.length) { animationState.isAnimating = false; return; } for (let i = 0; i < 3; i++) { if (animationState.index >= commands.length) break; const cmd = commands[animationState.index]; if (cmd.type === 'beginPath') drawLine(cmd.x - 0.01, cmd.y, cmd.x, cmd.y, cmd.color, cmd.size); else if (cmd.type === 'draw') drawLine(cmd.x0, cmd.y0, cmd.x1, cmd.y1, cmd.color, cmd.size); animationState.index++; } progressFill.style.width = `${(animationState.index / commands.length) * 100}%`; animationState.reqId = requestAnimationFrame(animateDrawing); }
+    function startAnimation(commands) { if (animationState.reqId) cancelAnimationFrame(animationState.reqId); ctx.clearRect(0,0,gameCanvas.width, gameCanvas.height); animationState = { isAnimating: true, commands: commands || [], index: 0, reqId: null }; animateDrawing(); }
+    
+    // --- Rendering Logic (MAJOR FIX) ---
+    function setCanvasSize() { const dpr = window.devicePixelRatio || 1; const rect = gameCanvas.getBoundingClientRect(); gameCanvas.width = rect.width * dpr; gameCanvas.height = rect.height * dpr; ctx.scale(dpr, dpr); }
+    
+    function renderGameCanvas() {
+        requestAnimationFrame(() => {
+            const w = gameCanvas.clientWidth;
+            const h = gameCanvas.clientHeight;
+            if (!w || !h) return;
+
+            // Always clear the entire canvas before drawing a new state
+            ctx.clearRect(0, 0, w, h);
+
+            switch (clientGameState) {
+                case 'LOBBY':
+                    drawLobbyScreen(w, h);
+                    break;
+                case 'PROMPTING':
+                    drawPromptScreen(w, h);
+                    break;
+                case 'DRAWING':
+                    drawDrawingScreen(w, h);
+                    break;
+                case 'REVEAL':
+                    drawRevealScreen(w, h); // Pass width and height
+                    break;
+            }
+        });
     }
 
-    function startAnimation(commands) {
-        if (animationState.reqId) cancelAnimationFrame(animationState.reqId);
-        ctx.clearRect(0,0,gameCanvas.width, gameCanvas.height);
-        animationState = { isAnimating: true, commands: commands || [], index: 0, reqId: null };
-        animateDrawing();
-    }
-    
-    // --- Rendering Logic ---
-    function setCanvasSize() { const dpr = window.devicePixelRatio || 1; const rect = gameCanvas.getBoundingClientRect(); gameCanvas.width = rect.width * dpr; gameCanvas.height = rect.height * dpr; ctx.scale(dpr, dpr); }
-    function renderGameCanvas() { requestAnimationFrame(() => { const w = gameCanvas.clientWidth, h = gameCanvas.clientHeight; if (!w || !h) return; switch (clientGameState) { case 'LOBBY': case 'PROMPTING': ctx.clearRect(0,0,gameCanvas.width,gameCanvas.height); break; case 'DRAWING': ctx.clearRect(0, 0, gameCanvas.width, 150); break; case 'REVEAL': break; } switch (clientGameState) { case 'LOBBY': drawLobbyScreen(w, h); break; case 'PROMPTING': drawPromptScreen(w, h); break; case 'DRAWING': drawDrawingScreen(w, h); break; case 'REVEAL': drawRevealScreen(); break;} }); }
+    function wrapText(context, text, x, y, maxWidth, lineHeight, font, color, alignment = 'center') { context.font = font; context.fillStyle = color; context.textAlign = alignment; const words = text.split(' '); let line = ''; let currentY = y; for (let n = 0; n < words.length; n++) { const testLine = line + words[n] + ' '; const metrics = context.measureText(testLine); if (metrics.width > maxWidth && n > 0) { context.fillText(line, x, currentY); line = words[n] + ' '; currentY += lineHeight; } else { line = testLine; } } context.fillText(line, x, currentY); }
     function drawLobbyScreen(w, h) { wrapText(ctx, 'Waiting for players...', w/2, h/2 - 20, w*0.8, 40, 'bold 32px Nunito', '#424242'); wrapText(ctx, 'The host will start the game.', w/2, h/2 + 30, w*0.8, 24, '20px Nunito', '#757575'); }
     function drawPromptScreen(w, h) {
         wrapText(ctx, 'Write something weird or funny!', w/2, h*0.15, w*0.9, 36, 'bold 28px Nunito', '#424242');
@@ -106,14 +100,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     function drawDrawingScreen(w, h) { if (currentTask) { wrapText(ctx, 'Your task to draw:', w/2, h*0.05, w*0.9, 22, '18px Nunito', '#424242'); wrapText(ctx, currentTask.content, w/2, h*0.05 + 30, w*0.9, 30, 'bold 24px Nunito', '#1a73e8'); } }
-    function drawRevealScreen() {
+    function drawRevealScreen(w, h) {
         if (!revealData.albums.length) return;
-        const w = gameCanvas.clientWidth, h = gameCanvas.clientHeight;
         const album = revealData.albums[revealData.albumIndex];
-        // Header text is drawn here, separate from animation
-        ctx.clearRect(0,0,w,h);
+        const step = album.steps[revealData.stepIndex];
+        // Header text is now drawn here, NOT in advanceReveal
         wrapText(ctx, `Album ${revealData.albumIndex + 1}/${revealData.albums.length} (by ${album.originalAuthorName})`, w/2, 30, w*0.9, 20, '16px Nunito', '#757575');
         wrapText(ctx, `Step ${revealData.stepIndex + 1}/${album.steps.length}`, w/2, 55, w*0.9, 20, '16px Nunito', '#757575');
+        // Animation/text is handled by advanceReveal
     }
     function drawLine(x0, y0, x1, y1, color, width) { ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'round'; ctx.stroke(); }
     function getSubmitButtonRect(w, h, y) { const btnW = w * 0.5, btnH = 55; return { x: (w - btnW)/2, y: y, w: btnW, h: btnH }; }
@@ -143,7 +137,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 gameCanvas.style.cursor = 'text';
                 drawingToolbar.classList.add('hidden');
                 doneButton.classList.add('hidden');
-                renderGameCanvas();
+                renderGameCanvas(); // <-- This will now call drawPromptScreen correctly
                 break;
             case 'prompt_accepted': promptSubmitted = true; renderGameCanvas(); break;
             case 'new_task':
@@ -166,8 +160,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 stopTimer();
                 drawingToolbar.classList.add('hidden');
                 doneButton.classList.add('hidden');
+                progressBar.classList.remove('hidden');
                 gameCanvas.style.cursor = 'pointer';
-                advanceReveal();
+                advanceReveal(); // Start the reveal sequence
                 break;
             case 'beginPath': drawLine(data.x - 0.01, data.y, data.x, data.y, data.color, data.size); break;
             case 'draw': drawLine(data.x0, data.y0, data.x1, data.y1, data.color, data.size); break;
@@ -182,8 +177,12 @@ document.addEventListener('DOMContentLoaded', () => {
     function advanceReveal() {
         if (animationState.reqId) cancelAnimationFrame(animationState.reqId);
         const album = revealData.albums[revealData.albumIndex];
+        if (!album) return; // Safety check
         const step = album.steps[revealData.stepIndex];
-        drawRevealScreen(); // Redraws the header text
+        
+        ctx.clearRect(0,0,gameCanvas.width, gameCanvas.height);
+        drawRevealScreen(gameCanvas.clientWidth, gameCanvas.clientHeight); // Redraws header
+
         if (step.type === 'prompt') {
             progressBar.classList.add('hidden');
             speak(step.content);
