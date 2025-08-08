@@ -79,7 +79,6 @@ app.ws('/draw/:lobbyId', (ws, req) => {
             case 'submit_description':
                 handleSubmitDescription(lobby, player, data.description, userId);
                 break;
-            // NOTE: 'beginPath' and 'draw' are no longer handled here to prevent live drawing.
         }
     });
 
@@ -111,23 +110,18 @@ function handlePlayerLeave(lobby, userId) {
         delete lobbies[lobbyId];
         console.log(`Lobby ${lobbyId} has been deleted.`);
     } else {
-        // If the host leaves, assign a new one
         if (wasHost) {
             lobby.hostId = Object.keys(lobby.players)[0];
         }
         // If a player leaves mid-round, it might complete the round
-        checkRoundCompletion(lobby, true);
+        checkRoundCompletion(lobby);
         broadcast(lobby, { type: 'player_left', userId, newHostId: lobby.hostId });
     }
 }
 
 // --- Game Logic Handlers ---
 function handleStartGame(lobby, userId) {
-    const isHost = userId === lobby.hostId;
-    const isLobbyState = lobby.gameState === 'LOBBY';
-    const hasEnoughPlayers = Object.keys(lobby.players).length >= 2;
-
-    if (isHost && isLobbyState && hasEnoughPlayers) {
+    if (userId === lobby.hostId && lobby.gameState === 'LOBBY' && Object.keys(lobby.players).length >= 2) {
         lobby.gameState = 'PROMPTING';
         // Create and store a shuffled player order for the entire game
         lobby.shuffledPlayerIds = Object.keys(lobby.players).sort(() => 0.5 - Math.random());
@@ -167,9 +161,15 @@ function handleSubmitDescription(lobby, player, description, userId) {
 }
 
 // --- Round Management ---
-function checkRoundCompletion(lobby, playerLeft = false) {
-    const allDone = Object.values(lobby.players).every(p => p.isDone);
-    if (allDone && Object.keys(lobby.players).length > 0) {
+function checkRoundCompletion(lobby) {
+    const playersInGame = Object.values(lobby.players);
+    if (playersInGame.length === 0) return; // Don't proceed if lobby is empty
+
+    const allDone = playersInGame.every(p => p.isDone);
+    
+    if (allDone) {
+        const lobbyId = Object.keys(lobbies).find(key => lobbies[key] === lobby);
+        console.log(`[Lobby ${lobbyId}] All players are done. Starting next round.`);
         startNextRound(lobby);
     }
 }
