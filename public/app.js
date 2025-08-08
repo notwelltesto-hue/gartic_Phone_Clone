@@ -45,25 +45,6 @@ document.addEventListener('DOMContentLoaded', () => {
         white: '#ffffff',
     };
 
-    // --- NEW: A robust function to wait for an element to have a valid size ---
-    function waitForElementSize(element, timeout = 2000) {
-        return new Promise((resolve, reject) => {
-            let elapsed = 0;
-            const check = () => {
-                const rect = element.getBoundingClientRect();
-                if (rect.width > 1 && rect.height > 1) {
-                    resolve(rect); // Success!
-                } else if (elapsed < timeout) {
-                    elapsed += 50; // Check again in 50ms
-                    setTimeout(check, 50);
-                } else {
-                    reject(new Error("Element did not get a size in time."));
-                }
-            };
-            check();
-        });
-    }
-
     // --- Utility and Rendering Functions ---
     function wrapText(context, text, x, y, maxWidth, lineHeight, font, color, alignment = 'center') {
         context.font = font;
@@ -86,29 +67,28 @@ document.addEventListener('DOMContentLoaded', () => {
         context.fillText(line, x, currentY);
     }
 
-    async function setCanvasSize() {
-        try {
-            // Wait for the parent to be ready before measuring
-            const rect = await waitForElementSize(gameCanvas.parentElement);
-            const dpr = window.devicePixelRatio || 1;
-            const size = Math.min(rect.width - 40, rect.height - 40, 900);
-            gameCanvas.width = size * dpr;
-            gameCanvas.height = size * dpr;
-            ctx.scale(dpr, dpr);
-            gameCanvas.style.width = `${size}px`;
-            gameCanvas.style.height = `${size}px`;
-        } catch (error) {
-            console.error("Canvas sizing failed:", error);
-            alert("There was an error setting up the game area. Please try refreshing.");
-        }
+    // --- THIS FUNCTION IS NOW SIMPLER AND MORE RELIABLE ---
+    function setCanvasSize() {
+        const dpr = window.devicePixelRatio || 1;
+        // Read the final size determined by CSS
+        const rect = gameCanvas.getBoundingClientRect();
+        
+        // Set the internal drawing surface size
+        gameCanvas.width = rect.width * dpr;
+        gameCanvas.height = rect.height * dpr;
+        
+        // Scale the context to avoid blurry drawings
+        ctx.scale(dpr, dpr);
     }
 
     function renderGameCanvas() {
         requestAnimationFrame(() => {
-            const w = gameCanvas.width / (window.devicePixelRatio || 1);
-            const h = gameCanvas.height / (window.devicePixelRatio || 1);
+            const w = gameCanvas.clientWidth; // Use clientWidth, which reads CSS size
+            const h = gameCanvas.clientHeight;
             if (!w || !h) return;
-            ctx.clearRect(0, 0, w, h);
+            // Clear using scaled dimensions
+            ctx.clearRect(0, 0, gameCanvas.width, gameCanvas.height);
+            
             switch (clientGameState) {
                 case 'LOBBY':
                     drawLobbyScreen(w, h);
@@ -190,7 +170,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // --- WebSocket Logic ---
     function connectWebSocket(username, lobbyId) {
         currentLobbyId = lobbyId;
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -216,10 +195,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 clientGameState = 'LOBBY';
                 showView('game');
                 
-                // --- THE FIX ---
-                await setCanvasSize(); // Wait for the canvas to be sized correctly
-                renderGameCanvas();  // Then render it
-                // --- END FIX ---
+                requestAnimationFrame(() => {
+                    setCanvasSize();
+                    renderGameCanvas();
+                });
 
                 updatePlayerList();
                 break;
@@ -253,7 +232,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     
-    // --- Event Listeners ---
     startGameBtn.addEventListener('click', () => ws.send(JSON.stringify({ type: 'start_game' })));
     
     window.addEventListener('keydown', (e) => {
@@ -272,8 +250,8 @@ document.addEventListener('DOMContentLoaded', () => {
     gameCanvas.addEventListener('mousedown', (e) => {
         if (clientGameState !== 'PROMPTING' || promptSubmitted || !currentPromptText) return;
         const rect = gameCanvas.getBoundingClientRect();
-        const w = gameCanvas.width / window.devicePixelRatio;
-        const h = gameCanvas.height / window.devicePixelRatio;
+        const w = rect.width;
+        const h = rect.height;
         const btn = getSubmitButtonRect(w, h, h * 0.35 + 60 + 30);
         const mouseX = e.clientX - rect.left;
         const mouseY = e.clientY - rect.top;
@@ -283,10 +261,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    window.addEventListener('resize', async () => {
+    window.addEventListener('resize', () => {
         if (clientGameState !== 'HOME') {
-            await setCanvasSize();
-            renderGameCanvas();
+            requestAnimationFrame(() => {
+                setCanvasSize();
+                renderGameCanvas();
+            });
         }
     });
 
