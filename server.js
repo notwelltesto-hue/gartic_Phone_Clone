@@ -24,7 +24,8 @@ app.post('/api/lobbies', (req, res) => {
         gameState: 'LOBBY', // LOBBY | PROMPTING | DRAWING | DESCRIBING | REVEAL
         players: {},
         albums: [],
-        roundTimer: null
+        roundTimer: null,
+        shuffledPlayerIds: []
     };
     console.log(`Lobby created: ${lobbyId} (Type: ${type})`);
     res.status(201).json({ lobbyId });
@@ -62,7 +63,8 @@ app.ws('/draw/:lobbyId', (ws, req) => {
             handlePlayerJoin(lobby, ws, userId, data.username);
             return;
         }
-        if (!player) return;
+
+        if (!player) return; // All subsequent actions require a joined player
 
         switch(data.type) {
             case 'start_game':
@@ -74,12 +76,10 @@ app.ws('/draw/:lobbyId', (ws, req) => {
             case 'submit_drawing':
                 handleSubmitDrawing(lobby, player, data.drawingCommands, userId);
                 break;
-            case 'beginPath':
-            case 'draw':
-                if (lobby.gameState === 'DRAWING') {
-                    broadcast(lobby, data, ws);
-                }
+            case 'submit_description':
+                handleSubmitDescription(lobby, player, data.description, userId);
                 break;
+            // NOTE: 'beginPath' and 'draw' are no longer handled here to prevent live drawing.
         }
     });
 
@@ -93,7 +93,7 @@ function handlePlayerJoin(lobby, ws, userId, username) {
         return ws.close();
     }
     lobby.players[userId] = { username, ws, isDone: false };
-    if (!lobby.hostId) lobby.hostId = userId;
+    if (!lobby.hostId) lobby.hostId = userId; // First player is the host
     ws.send(JSON.stringify({ type: 'initial_state', userId, hostId: lobby.hostId, players: getPlayerList(lobby) }));
     broadcast(lobby, { type: 'player_joined', player: { id: userId, username } }, ws);
 }
@@ -109,12 +109,13 @@ function handlePlayerLeave(lobby, userId) {
     if (Object.keys(lobby.players).length === 0) {
         if (lobby.roundTimer) clearTimeout(lobby.roundTimer);
         delete lobbies[lobbyId];
-        console.log(`Lobby ${lobbyId} deleted.`);
+        console.log(`Lobby ${lobbyId} has been deleted.`);
     } else {
+        // If the host leaves, assign a new one
         if (wasHost) {
             lobby.hostId = Object.keys(lobby.players)[0];
         }
-        // If a player leaves mid-round, check if they were the last one needed to finish
+        // If a player leaves mid-round, it might complete the round
         checkRoundCompletion(lobby, true);
         broadcast(lobby, { type: 'player_left', userId, newHostId: lobby.hostId });
     }
@@ -122,8 +123,14 @@ function handlePlayerLeave(lobby, userId) {
 
 // --- Game Logic Handlers ---
 function handleStartGame(lobby, userId) {
-    if (userId === lobby.hostId && lobby.gameState === 'LOBBY' && Object.keys(lobby.players).length >= 2) {
+    const isHost = userId === lobby.hostId;
+    const isLobbyState = lobby.gameState === 'LOBBY';
+    const hasEnoughPlayers = Object.keys(lobby.players).length >= 2;
+
+    if (isHost && isLobbyState && hasEnoughPlayers) {
         lobby.gameState = 'PROMPTING';
+        // Create and store a shuffled player order for the entire game
+        lobby.shuffledPlayerIds = Object.keys(lobby.players).sort(() => 0.5 - Math.random());
         broadcast(lobby, { type: 'game_started' });
     }
 }
@@ -139,10 +146,20 @@ function handleSubmitPrompt(lobby, player, prompt) {
 
 function handleSubmitDrawing(lobby, player, drawingCommands, userId) {
     if (lobby.gameState === 'DRAWING' && !player.isDone) {
-        // Find the album where this player has a drawing task
         const album = lobby.albums.find(a => a.tasks[userId] === 'draw');
         if (album) {
-            album.steps.push({ type: 'drawing', content: drawingCommands }); // Store command array
+            album.steps.push({ type: 'drawing', content: drawingCommands });
+            player.isDone = true;
+            checkRoundCompletion(lobby);
+        }
+    }
+}
+
+function handleSubmitDescription(lobby, player, description, userId) {
+    if (lobby.gameState === 'DESCRIBING' && !player.isDone) {
+        const album = lobby.albums.find(a => a.tasks[userId] === 'describe');
+        if (album) {
+            album.steps.push({ type: 'prompt', content: description });
             player.isDone = true;
             checkRoundCompletion(lobby);
         }
@@ -151,7 +168,6 @@ function handleSubmitDrawing(lobby, player, drawingCommands, userId) {
 
 // --- Round Management ---
 function checkRoundCompletion(lobby, playerLeft = false) {
-    // A player leaving can also trigger round completion
     const allDone = Object.values(lobby.players).every(p => p.isDone);
     if (allDone && Object.keys(lobby.players).length > 0) {
         startNextRound(lobby);
@@ -165,32 +181,40 @@ function startNextRound(lobby) {
     const numPlayers = Object.keys(lobby.players).length;
     const isFirstRound = lobby.albums.length === 0;
 
+    // If the albums are full, the game is over
     if (!isFirstRound && lobby.albums[0].steps.length >= numPlayers) {
         startRevealPhase(lobby);
         return;
     }
-    
-    // For now, we only have drawing rounds. In the future, this will alternate.
-    startDrawingRound(lobby);
+
+    // Alternate between drawing and describing
+    const nextStepIsDrawing = isFirstRound || lobby.albums[0].steps.length % 2 === 1;
+    if (nextStepIsDrawing) {
+        startDrawingRound(lobby);
+    } else {
+        startDescribingRound(lobby);
+    }
 }
 
 function startDrawingRound(lobby) {
     lobby.gameState = 'DRAWING';
-    const playerIds = Object.keys(lobby.players);
-    const shuffledIds = playerIds.sort(() => 0.5 - Math.random());
+    const playerIds = lobby.shuffledPlayerIds;
 
-    if (lobby.albums.length === 0) { // This is the first drawing round (after prompts)
-        lobby.albums = shuffledIds.map(id => ({
+    // On the very first round, create the albums from initial prompts
+    if (lobby.albums.length === 0) {
+        lobby.albums = playerIds.map(id => ({
             originalAuthor: id,
             steps: [{ type: 'prompt', content: lobby.players[id].prompt }],
             tasks: {}
         }));
     }
 
-    for (let i = 0; i < shuffledIds.length; i++) {
-        const currentPlayerId = shuffledIds[i];
-        const assignedAlbumIndex = (i + 1) % shuffledIds.length;
+    for (let i = 0; i < playerIds.length; i++) {
+        const currentPlayerId = playerIds[i];
+        const assignedAlbumIndex = (i + 1) % playerIds.length; // Pass the album to the "next" player
         const assignedAlbum = lobby.albums[assignedAlbumIndex];
+        
+        assignedAlbum.tasks = {}; // Clear old tasks
         assignedAlbum.tasks[currentPlayerId] = 'draw';
         
         const task = {
@@ -201,15 +225,36 @@ function startDrawingRound(lobby) {
         lobby.players[currentPlayerId].ws.send(JSON.stringify(task));
     }
 
-    // Authoritative timer that forces the round to end
     lobby.roundTimer = setTimeout(() => {
-        const lobbyId = Object.keys(lobbies).find(key => lobbies[key] === lobby);
-        console.log(`Lobby ${lobbyId} timer expired. Force-ending round.`);
         Object.entries(lobby.players).forEach(([id, player]) => {
-            if (!player.isDone) {
-                // Forcefully submit an empty drawing for players who didn't finish
-                handleSubmitDrawing(lobby, player, [], id);
-            }
+            if (!player.isDone) handleSubmitDrawing(lobby, player, [], id); // Submit empty drawing if timed out
+        });
+    }, ROUND_TIME);
+}
+
+function startDescribingRound(lobby) {
+    lobby.gameState = 'DESCRIBING';
+    const playerIds = lobby.shuffledPlayerIds;
+    
+    for (let i = 0; i < playerIds.length; i++) {
+        const currentPlayerId = playerIds[i];
+        const assignedAlbumIndex = (i + 1) % playerIds.length;
+        const assignedAlbum = lobby.albums[assignedAlbumIndex];
+        
+        assignedAlbum.tasks = {}; // Clear old tasks
+        assignedAlbum.tasks[currentPlayerId] = 'describe';
+
+        const task = {
+            type: 'new_task',
+            task: { type: 'describe', content: assignedAlbum.steps[assignedAlbum.steps.length - 1].content },
+            endTime: Date.now() + ROUND_TIME
+        };
+        lobby.players[currentPlayerId].ws.send(JSON.stringify(task));
+    }
+    
+    lobby.roundTimer = setTimeout(() => {
+        Object.entries(lobby.players).forEach(([id, player]) => {
+            if (!player.isDone) handleSubmitDescription(lobby, player, "...", id); // Submit placeholder text if timed out
         });
     }, ROUND_TIME);
 }
