@@ -9,19 +9,6 @@ app.use(express.static('public'));
 const wsInstance = expressWs(app);
 
 const lobbies = {};
-/*
-NEW Lobby Structure:
-{
-  ...
-  gameState: 'LOBBY' | 'PROMPTING' | 'DRAWING' | 'DESCRIBING' | 'REVEAL',
-  albums: [ // The core of the game!
-    {
-      originalAuthor: 'userId',
-      steps: [ { type: 'prompt' | 'drawing', content: '...' } ]
-    }
-  ]
-}
-*/
 
 // --- HTTP Routes ---
 app.post('/api/lobbies', (req, res) => {
@@ -38,9 +25,11 @@ app.post('/api/lobbies', (req, res) => {
 });
 
 app.get('/api/lobbies', (req, res) => {
+    // FIX: The logic here was correct, but let's log to be sure.
     const publicLobbies = Object.entries(lobbies)
         .filter(([, lobby]) => lobby.type === 'public' && lobby.gameState === 'LOBBY')
         .map(([id, lobby]) => ({ id, userCount: Object.keys(lobby.players).length }));
+    console.log("Sending public lobbies:", publicLobbies);
     res.json(publicLobbies);
 });
 
@@ -65,6 +54,7 @@ app.ws('/draw/:lobbyId', (ws, req) => {
         const data = JSON.parse(msg);
         const player = lobby.players[userId];
 
+        // Join is special, player isn't fully in yet
         if (data.type === 'join') {
             if (lobby.gameState !== 'LOBBY') {
                 ws.send(JSON.stringify({ type: 'error', message: 'Game has already started.' }));
@@ -77,7 +67,7 @@ app.ws('/draw/:lobbyId', (ws, req) => {
             return;
         }
 
-        if (!player) return; // For all other messages, ignore if player not in lobby
+        if (!player) return;
 
         switch (data.type) {
             case 'start_game':
@@ -88,11 +78,18 @@ app.ws('/draw/:lobbyId', (ws, req) => {
                 break;
             
             case 'submit_prompt':
-                if (lobby.gameState === 'PROMPTING' && !player.prompt) { // Prevent double submission
+                if (lobby.gameState === 'PROMPTING' && !player.prompt) {
                     player.prompt = data.prompt.slice(0, 100);
                     ws.send(JSON.stringify({ type: 'prompt_accepted' }));
-                    checkAllPromptsSubmitted(lobby); // Check if game can advance
+                    checkAllPromptsSubmitted(lobby);
                 }
+                break;
+
+            // NEW: Handle drawing data
+            case 'beginPath':
+            case 'draw':
+                // For now, we just broadcast the drawing data to other players
+                broadcast(lobby, data, ws);
                 break;
         }
     });
@@ -101,9 +98,7 @@ app.ws('/draw/:lobbyId', (ws, req) => {
         if (!lobby.players[userId]) return;
         const username = lobby.players[userId].username;
         delete lobby.players[userId];
-
         if (Object.keys(lobby.players).length === 0) {
-            console.log(`Lobby ${lobbyId} is empty, deleting.`);
             delete lobbies[lobbyId];
         } else {
             if (lobby.hostId === userId) {
@@ -114,37 +109,29 @@ app.ws('/draw/:lobbyId', (ws, req) => {
     });
 });
 
-// --- Game Logic Functions ---
+// --- Game Logic ---
 function checkAllPromptsSubmitted(lobby) {
     const allSubmitted = Object.values(lobby.players).every(p => p.prompt);
     if (allSubmitted && lobby.gameState === 'PROMPTING') {
-        console.log(`All prompts submitted for lobby ${Object.keys(lobbies).find(key => lobbies[key] === lobby)}. Starting drawing round.`);
         startDrawingRound(lobby);
     }
 }
 
 function startDrawingRound(lobby) {
     lobby.gameState = 'DRAWING';
-    
     const playerIds = Object.keys(lobby.players);
-    const shuffledIds = playerIds.sort(() => Math.random() - 0.5);
-
+    const shuffledIds = playerIds.sort(() => 0.5 - Math.random());
     lobby.albums = shuffledIds.map(id => ({
         originalAuthor: id,
         steps: [{ type: 'prompt', content: lobby.players[id].prompt }]
     }));
-
     for (let i = 0; i < shuffledIds.length; i++) {
         const currentPlayerId = shuffledIds[i];
-        const nextPlayerIndex = (i + 1) % shuffledIds.length;
-        const assignedAlbum = lobby.albums[nextPlayerIndex];
-
+        const assignedAlbumIndex = (i + 1) % shuffledIds.length;
+        const assignedAlbum = lobby.albums[assignedAlbumIndex];
         const task = {
             type: 'new_task',
-            task: {
-                type: 'draw',
-                content: assignedAlbum.steps[0].content
-            }
+            task: { type: 'draw', content: assignedAlbum.steps[0].content }
         };
         lobby.players[currentPlayerId].ws.send(JSON.stringify(task));
     }
@@ -152,9 +139,7 @@ function startDrawingRound(lobby) {
 
 function getPlayerList(lobby) {
     const playerList = {};
-    for (const id in lobby.players) {
-        playerList[id] = { username: lobby.players[id].username };
-    }
+    for (const id in lobby.players) playerList[id] = { username: lobby.players[id].username };
     return playerList;
 }
 
