@@ -9,6 +9,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentPromptText = '';
     let promptSubmitted = false;
     let currentTask = null;
+    let lastBlinkTime = 0;
+    let cursorVisible = true;
 
     // --- DOM Elements ---
     const views = {
@@ -31,6 +33,46 @@ document.addEventListener('DOMContentLoaded', () => {
     const privateLobbyCodeInput = document.getElementById('private-lobby-code');
     const joinLobbyBtn = document.getElementById('join-lobby-btn');
     const usernameInput = document.getElementById('username-input');
+
+    // --- Styling Constants ---
+    const COLORS = {
+        bg: '#e4e9f0',
+        canvas: '#ffffff',
+        primary: '#1a73e8',
+        green: '#34a853',
+        gray: '#757575',
+        darkGray: '#424242',
+        lightGray: '#bdbdbd',
+        text: '#212121',
+        white: '#ffffff',
+    };
+
+    // --- NEW: A robust text-wrapping utility function ---
+    function wrapText(context, text, x, y, maxWidth, lineHeight, font, color, alignment = 'center') {
+        context.font = font;
+        context.fillStyle = color;
+        context.textAlign = alignment;
+        
+        const words = text.split(' ');
+        let line = '';
+        let testLine;
+        let currentY = y;
+
+        for (let n = 0; n < words.length; n++) {
+            testLine = line + words[n] + ' ';
+            const metrics = context.measureText(testLine);
+            const testWidth = metrics.width;
+            if (testWidth > maxWidth && n > 0) {
+                context.fillText(line, x, currentY);
+                line = words[n] + ' ';
+                currentY += lineHeight;
+            } else {
+                line = testLine;
+            }
+        }
+        context.fillText(line, x, currentY);
+        return currentY; // Return the Y position of the last line
+    }
 
     // --- Canvas UI Rendering ---
     function setCanvasSize() {
@@ -63,58 +105,57 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function drawLobbyScreen(w, h) {
-        ctx.fillStyle = '#757575';
-        ctx.font = 'bold 32px Nunito';
-        ctx.textAlign = 'center';
-        ctx.fillText('Waiting for players...', w / 2, h / 2);
-        ctx.font = '20px Nunito';
-        ctx.fillText('The host will start the game.', w / 2, h / 2 + 40);
+        wrapText(ctx, 'Waiting for players...', w / 2, h / 2 - 20, w * 0.8, 40, 'bold 32px Nunito', COLORS.darkGray);
+        wrapText(ctx, 'The host will start the game when everyone is ready.', w / 2, h / 2 + 30, w * 0.8, 24, '20px Nunito', COLORS.gray);
     }
 
     function drawPromptScreen(w, h) {
-        ctx.fillStyle = '#424242';
-        ctx.font = 'bold 28px Nunito';
-        ctx.textAlign = 'center';
-        ctx.fillText('Write something weird or funny!', w / 2, h * 0.2);
+        wrapText(ctx, 'Write something weird or funny!', w / 2, h * 0.15, w * 0.9, 36, 'bold 28px Nunito', COLORS.darkGray);
 
+        const inputBoxY = h * 0.35;
+        const inputBoxHeight = 60;
+        
         // Text input box simulation
-        ctx.strokeStyle = '#bdbdbd';
+        ctx.strokeStyle = COLORS.lightGray;
         ctx.lineWidth = 2;
-        ctx.strokeRect(w * 0.1, h * 0.4, w * 0.8, 50);
+        ctx.strokeRect(w * 0.1, inputBoxY, w * 0.8, inputBoxHeight);
         
-        ctx.fillStyle = '#212121';
+        // Text inside the box
         ctx.font = '24px Nunito';
+        ctx.fillStyle = COLORS.text;
         ctx.textAlign = 'left';
-        ctx.fillText(currentPromptText + (Date.now() % 1000 < 500 && !promptSubmitted ? '|' : ''), w * 0.1 + 10, h * 0.4 + 35);
         
+        // Blinking cursor logic
+        const now = Date.now();
+        if (now - lastBlinkTime > 500) {
+            cursorVisible = !cursorVisible;
+            lastBlinkTime = now;
+        }
+        const cursor = (cursorVisible && !promptSubmitted) ? '|' : '';
+        ctx.fillText(currentPromptText + cursor, w * 0.1 + 15, inputBoxY + inputBoxHeight / 2 + 8);
+        
+        // Button or submitted message
+        const buttonY = inputBoxY + inputBoxHeight + 30;
         if (!promptSubmitted) {
-            const btn = getSubmitButtonRect(w, h);
-            ctx.fillStyle = currentPromptText ? '#34a853' : '#a5d6a7';
+            const btn = getSubmitButtonRect(w, h, buttonY);
+            ctx.fillStyle = currentPromptText ? COLORS.green : '#a5d6a7';
             ctx.fillRect(btn.x, btn.y, btn.w, btn.h);
-            ctx.fillStyle = 'white';
-            ctx.font = 'bold 24px Nunito';
-            ctx.textAlign = 'center';
-            ctx.fillText('Submit', w / 2, btn.y + 35);
+            wrapText(ctx, 'Submit (Enter)', w / 2, btn.y + 35, btn.w, 30, 'bold 24px Nunito', COLORS.white);
         } else {
-            ctx.fillStyle = '#757575';
-            ctx.font = 'bold 24px Nunito';
-            ctx.textAlign = 'center';
-            ctx.fillText("Submitted! Waiting for others...", w / 2, h * 0.65);
+            wrapText(ctx, "Submitted! Waiting for others...", w / 2, buttonY + 25, w * 0.8, 30, 'bold 24px Nunito', COLORS.gray);
         }
     }
 
     function drawDrawingScreen(w, h, prompt) {
-        ctx.fillStyle = '#424242';
-        ctx.font = '18px Nunito';
-        ctx.textAlign = 'center';
-        ctx.fillText('Your task to draw:', w / 2, h * 0.05);
-        ctx.font = 'bold 24px Nunito';
-        ctx.fillText(prompt, w / 2, h * 0.05 + 35);
-        // Drawing logic will go here later
+        wrapText(ctx, 'Your task to draw:', w / 2, h * 0.05, w * 0.9, 22, '18px Nunito', COLORS.darkGray);
+        wrapText(ctx, prompt, w / 2, h * 0.05 + 30, w * 0.9, 30, 'bold 24px Nunito', COLORS.primary);
+        // The rest of the space is for drawing
     }
 
-    function getSubmitButtonRect(w, h) {
-        return { x: w * 0.3, y: h * 0.6, w: w * 0.4, h: 50 };
+    function getSubmitButtonRect(w, h, y) {
+        const btnWidth = w * 0.5;
+        const btnHeight = 55;
+        return { x: (w - btnWidth) / 2, y, w: btnWidth, h: btnHeight };
     }
 
     // --- View Management ---
@@ -202,16 +243,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     // --- Event Listeners ---
-    startGameBtn.addEventListener('click', () => {
-        ws.send(JSON.stringify({ type: 'start_game' }));
-    });
+    startGameBtn.addEventListener('click', () => ws.send(JSON.stringify({ type: 'start_game' })));
     
     window.addEventListener('keydown', (e) => {
         if (clientGameState !== 'PROMPTING' || promptSubmitted) return;
+        e.preventDefault();
         if (e.key === 'Backspace') {
             currentPromptText = currentPromptText.slice(0, -1);
         } else if (e.key === 'Enter') {
-            if(currentPromptText) ws.send(JSON.stringify({ type: 'submit_prompt', prompt: currentPromptText }));
+            if (currentPromptText) ws.send(JSON.stringify({ type: 'submit_prompt', prompt: currentPromptText }));
         } else if (e.key.length === 1 && currentPromptText.length < 100) {
             currentPromptText += e.key;
         }
@@ -219,16 +259,16 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     gameCanvas.addEventListener('mousedown', (e) => {
-        if (clientGameState !== 'PROMPTING' || promptSubmitted) return;
+        if (clientGameState !== 'PROMPTING' || promptSubmitted || !currentPromptText) return;
         const rect = gameCanvas.getBoundingClientRect();
-        const mouseX = e.clientX - rect.left;
-        const mouseY = e.clientY - rect.top;
         const w = gameCanvas.width / window.devicePixelRatio;
         const h = gameCanvas.height / window.devicePixelRatio;
-        const btn = getSubmitButtonRect(w, h);
+        const btn = getSubmitButtonRect(w, h, h * 0.35 + 60 + 30);
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
 
         if (mouseX > btn.x && mouseX < btn.x + btn.w && mouseY > btn.y && mouseY < btn.y + btn.h) {
-            if (currentPromptText) ws.send(JSON.stringify({ type: 'submit_prompt', prompt: currentPromptText }));
+            ws.send(JSON.stringify({ type: 'submit_prompt', prompt: currentPromptText }));
         }
     });
 
@@ -273,7 +313,7 @@ document.addEventListener('DOMContentLoaded', () => {
             renderGameCanvas();
         }
     });
-    setInterval(() => { if (clientGameState === 'PROMPTING') renderGameCanvas(); }, 500); // For cursor blink
+    setInterval(() => { if (clientGameState === 'PROMPTING' && !promptSubmitted) renderGameCanvas() }, 500);
 
     // --- Initial Setup ---
     showView('home');
