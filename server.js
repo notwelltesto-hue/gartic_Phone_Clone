@@ -11,24 +11,38 @@ const wsInstance = expressWs(app);
 const lobbies = {};
 const ROUND_TIME = 60000; // 60 seconds in milliseconds
 
-// --- HTTP Routes (Unchanged) ---
+// --- HTTP Routes ---
 app.post('/api/lobbies', (req, res) => {
     const { type } = req.body;
+    if (type !== 'public' && type !== 'private') {
+        return res.status(400).json({ message: 'Invalid lobby type.' });
+    }
     const lobbyId = short.generate();
     lobbies[lobbyId] = {
-        type, hostId: null, gameState: 'LOBBY', players: {}, albums: [], roundTimer: null
+        type,
+        hostId: null,
+        gameState: 'LOBBY', // LOBBY | PROMPTING | DRAWING | DESCRIBING | REVEAL
+        players: {},
+        albums: [],
+        roundTimer: null
     };
+    console.log(`Lobby created: ${lobbyId} (Type: ${type})`);
     res.status(201).json({ lobbyId });
 });
+
 app.get('/api/lobbies', (req, res) => {
     const publicLobbies = Object.entries(lobbies)
-        .filter(([,l]) => l.type === 'public' && l.gameState === 'LOBBY')
-        .map(([id, l]) => ({ id, userCount: Object.keys(l.players).length }));
+        .filter(([, lobby]) => lobby.type === 'public' && lobby.gameState === 'LOBBY')
+        .map(([id, lobby]) => ({ id, userCount: Object.keys(lobby.players).length }));
     res.json(publicLobbies);
 });
+
 app.get('/api/lobbies/:lobbyId', (req, res) => {
-    if (lobbies[req.params.lobbyId]) res.status(200).json({ message: 'Lobby exists.' });
-    else res.status(404).json({ message: 'Lobby not found.' });
+    if (lobbies[req.params.lobbyId]) {
+        res.status(200).json({ message: 'Lobby exists.' });
+    } else {
+        res.status(404).json({ message: 'Lobby not found.' });
+    }
 });
 
 // --- WebSocket Route ---
@@ -43,15 +57,18 @@ app.ws('/draw/:lobbyId', (ws, req) => {
     ws.on('message', (msg) => {
         const data = JSON.parse(msg);
         const player = lobby.players[userId];
+
         if (data.type === 'join') {
             handlePlayerJoin(lobby, ws, userId, data.username);
             return;
         }
-        if (!player) return; // All other actions require a joined player
+        if (!player) return;
+
         switch(data.type) {
             case 'start_game': handleStartGame(lobby, userId); break;
             case 'submit_prompt': handleSubmitPrompt(lobby, player, data.prompt); break;
             case 'submit_drawing': handleSubmitDrawing(lobby, player, data.drawing, userId); break;
+            // Add other submissions like 'submit_description' here in the future
         }
     });
 
@@ -69,14 +86,20 @@ function handlePlayerJoin(lobby, ws, userId, username) {
     ws.send(JSON.stringify({ type: 'initial_state', userId, hostId: lobby.hostId, players: getPlayerList(lobby) }));
     broadcast(lobby, { type: 'player_joined', player: { id: userId, username } }, ws);
 }
+
 function handlePlayerLeave(lobby, userId) {
     if (!lobby.players[userId]) return;
+    const wasHost = lobby.hostId === userId;
     delete lobby.players[userId];
+    
     if (Object.keys(lobby.players).length === 0) {
         if (lobby.roundTimer) clearTimeout(lobby.roundTimer);
         delete lobbies[Object.keys(lobbies).find(key => lobbies[key] === lobby)];
+        console.log(`Lobby ${Object.keys(lobbies).find(key => lobbies[key] === lobby)} deleted.`);
     } else {
-        if (lobby.hostId === userId) lobby.hostId = Object.keys(lobby.players)[0];
+        if (wasHost) lobby.hostId = Object.keys(lobby.players)[0];
+        // If a player leaves mid-round, check if their departure completes the round
+        checkRoundCompletion(lobby);
         broadcast(lobby, { type: 'player_left', userId, newHostId: lobby.hostId });
     }
 }
@@ -88,6 +111,7 @@ function handleStartGame(lobby, userId) {
         broadcast(lobby, { type: 'game_started' });
     }
 }
+
 function handleSubmitPrompt(lobby, player, prompt) {
     if (lobby.gameState === 'PROMPTING' && !player.prompt) {
         player.prompt = prompt.slice(0, 100);
@@ -96,6 +120,7 @@ function handleSubmitPrompt(lobby, player, prompt) {
         checkRoundCompletion(lobby);
     }
 }
+
 function handleSubmitDrawing(lobby, player, drawing, userId) {
     if (lobby.gameState === 'DRAWING' && !player.isDone) {
         const album = lobby.albums.find(a => a.tasks[userId] === 'draw');
@@ -120,17 +145,15 @@ function startNextRound(lobby) {
     Object.values(lobby.players).forEach(p => p.isDone = false); // Reset for next round
 
     const numPlayers = Object.keys(lobby.players).length;
-    // The first round is always drawing. After that, it's describing, drawing, etc.
-    const isDrawingRound = lobby.albums.length === 0 || lobby.albums[0].steps.length % 2 === 1;
+    const isFirstRound = lobby.albums.length === 0;
 
-    if (lobby.albums.length > 0 && lobby.albums[0].steps.length >= numPlayers) {
+    if (!isFirstRound && lobby.albums[0].steps.length >= numPlayers) {
         startRevealPhase(lobby);
         return;
     }
-
-    if (isDrawingRound) {
-        startDrawingRound(lobby);
-    } // Future: else { startDescribingRound(lobby); }
+    
+    // For now, we only have drawing rounds
+    startDrawingRound(lobby);
 }
 
 function startDrawingRound(lobby) {
@@ -154,7 +177,7 @@ function startDrawingRound(lobby) {
         
         const task = {
             type: 'new_task',
-            task: { type: 'draw', content: assignedAlbum.steps[0].content },
+            task: { type: 'draw', content: assignedAlbum.steps[assignedAlbum.steps.length - 1].content },
             endTime: Date.now() + ROUND_TIME
         };
         lobby.players[currentPlayerId].ws.send(JSON.stringify(task));
@@ -166,7 +189,6 @@ function startDrawingRound(lobby) {
 function startRevealPhase(lobby) {
     lobby.gameState = 'REVEAL';
     if (lobby.roundTimer) clearTimeout(lobby.roundTimer);
-    // Sanitize albums before sending (remove WebSocket objects)
     const finalAlbums = lobby.albums.map(album => ({
         originalAuthorName: lobby.players[album.originalAuthor]?.username || 'A mystery player',
         steps: album.steps
