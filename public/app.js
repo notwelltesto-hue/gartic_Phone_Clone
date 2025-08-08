@@ -1,42 +1,34 @@
 document.addEventListener('DOMContentLoaded', () => {
-    // --- Views & Modals ---
+    // --- State ---
+    let ws;
+    let currentLobbyId = null;
+    let myPlayerId = null;
+    let hostPlayerId = null;
+    let players = {};
+
+    // --- DOM Elements ---
+    const appRoot = document.getElementById('app-root');
+    // Views
     const views = {
         home: document.getElementById('home-screen'),
         createModal: document.getElementById('create-lobby-modal'),
         usernameModal: document.getElementById('username-modal'),
-        app: document.getElementById('app-container')
+        game: document.getElementById('game-container'),
     };
-
-    // --- Home Screen Elements ---
+    // Game Views
+    const gameViews = {
+        waiting: document.getElementById('waiting-room-view'),
+        prompting: document.getElementById('prompt-view'),
+        drawing: document.getElementById('drawing-view'),
+    };
+    // Other Elements
     const showCreateLobbyBtn = document.getElementById('show-create-lobby-btn');
-    const privateLobbyCodeInput = document.getElementById('private-lobby-code');
-    const joinPrivateBtn = document.getElementById('join-private-btn');
-    const publicLobbyList = document.getElementById('public-lobby-list');
-    const refreshLobbiesBtn = document.getElementById('refresh-lobbies-btn');
-
-    // --- Create Modal Elements ---
-    const createBtns = document.querySelectorAll('.create-btn');
-    const cancelCreateBtn = document.getElementById('cancel-create-btn');
-
-    // --- Username Modal Elements ---
-    const usernameInput = document.getElementById('username-input');
-    const joinLobbyBtn = document.getElementById('join-lobby-btn');
-
-    // --- App Elements ---
+    const playerList = document.getElementById('player-list');
+    const startGameBtn = document.getElementById('start-game-btn');
     const lobbyCodeDisplay = document.getElementById('lobby-code-display');
-    const canvas = document.getElementById('drawing-canvas');
-    const userList = document.getElementById('user-list');
-    const colorPicker = document.getElementById('color-picker');
-    const brushSize = document.getElementById('brush-size');
-    const brushSizeValue = document.getElementById('brush-size-value');
-    const ctx = canvas.getContext('2d');
-
-    // --- State ---
-    let currentLobbyId = null;
-    let isDrawing = false;
-    let ws;
-    let connectedUsers = {};
-    let canvasHistory = [];
+    const promptInput = document.getElementById('prompt-input');
+    const submitPromptBtn = document.getElementById('submit-prompt-btn');
+    const promptSubmittedMsg = document.getElementById('prompt-submitted-msg');
 
     // --- View Management ---
     function showView(viewName) {
@@ -48,246 +40,162 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // --- API Calls ---
-    async function fetchPublicLobbies() {
-        try {
-            const response = await fetch('/api/lobbies');
-            if (!response.ok) throw new Error('Failed to fetch lobbies');
-            const lobbies = await response.json();
-            publicLobbyList.innerHTML = '';
-            if (lobbies.length === 0) {
-                publicLobbyList.innerHTML = '<li>No public lobbies found.</li>';
-            } else {
-                lobbies.forEach(lobby => {
-                    const li = document.createElement('li');
-                    li.textContent = `Lobby ${lobby.id} (${lobby.userCount} users)`;
-                    li.dataset.lobbyId = lobby.id;
-                    publicLobbyList.appendChild(li);
-                });
-            }
-        } catch (error) {
-            console.error('Failed to fetch lobbies:', error);
-            publicLobbyList.innerHTML = '<li>Error loading lobbies.</li>';
+    function showGameView(viewName) {
+        for (const key in gameViews) {
+            gameViews[key].classList.add('hidden');
+        }
+        if (gameViews[viewName]) {
+            gameViews[viewName].classList.remove('hidden');
         }
     }
 
-    async function createLobby(event) {
-        const button = event.target;
-        const type = button.dataset.type;
-        const originalText = button.textContent;
-
-        button.disabled = true;
-        button.textContent = 'Creating...';
-
-        try {
-            console.log(`[CLIENT] Sending request to create lobby of type: ${type}`);
-            const response = await fetch('/api/lobbies', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ type: type })
-            });
-
-            console.log(`[CLIENT] Received response with status: ${response.status}`);
-            const data = await response.json();
-
-            if (response.ok) {
-                console.log('[CLIENT] Successfully parsed response data:', data);
-                if (data.lobbyId) {
-                    currentLobbyId = data.lobbyId;
-                    views.createModal.classList.add('hidden');
-                    showView('usernameModal');
-                } else {
-                    console.error('[CLIENT] Response was OK, but no lobbyId was found.');
-                    alert('An unexpected server error occurred.');
-                }
-            } else {
-                console.error(`[CLIENT] Server responded with an error: ${response.status}`, data);
-                alert(`Failed to create lobby: ${data.message || 'Unknown error'}`);
+    // --- UI Updates ---
+    function updatePlayerList() {
+        playerList.innerHTML = '';
+        for (const id in players) {
+            const player = players[id];
+            const li = document.createElement('li');
+            li.textContent = player.username;
+            if (id === myPlayerId) {
+                li.innerHTML += ' <span class="role">(You)</span>';
+                li.style.fontWeight = 'bold';
             }
-        } catch (error) {
-            console.error('[CLIENT] A network error occurred:', error);
-            alert('A network error occurred. Please check your connection.');
-        } finally {
-            button.disabled = false;
-            button.textContent = originalText;
+            if (id === hostPlayerId) {
+                li.innerHTML += ' <span class="role">(Host)</span>';
+            }
+            playerList.appendChild(li);
+        }
+
+        // Show/hide start button
+        if (myPlayerId === hostPlayerId) {
+            startGameBtn.classList.remove('hidden');
+            startGameBtn.disabled = Object.keys(players).length < 2; // Need at least 2 players
+        } else {
+            startGameBtn.classList.add('hidden');
         }
     }
 
     // --- WebSocket Logic ---
     function connectWebSocket(username, lobbyId) {
+        currentLobbyId = lobbyId;
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         ws = new WebSocket(`${protocol}//${window.location.host}/draw/${lobbyId}`);
+
         ws.onopen = () => ws.send(JSON.stringify({ type: 'join', username }));
         ws.onmessage = handleWebSocketMessage;
         ws.onclose = () => {
-            alert('Connection lost. Please refresh and rejoin.');
+            alert('Connection lost or rejected. Returning to home screen.');
             showView('home');
         };
     }
 
     function handleWebSocketMessage(event) {
         const data = JSON.parse(event.data);
+        console.log('Received:', data);
+
         switch (data.type) {
             case 'initial_state':
-                connectedUsers = data.users;
-                canvasHistory = data.canvasHistory;
-                redrawCanvas(canvasHistory);
-                updateUserList();
+                myPlayerId = data.userId;
+                hostPlayerId = data.hostId;
+                players = data.players;
+                lobbyCodeDisplay.textContent = currentLobbyId;
+                showView('game');
+                showGameView('waiting');
+                updatePlayerList();
                 break;
-            case 'user_joined':
-                connectedUsers[data.userId] = data.username;
-                updateUserList();
+
+            case 'player_joined':
+                players[data.player.id] = { username: data.player.username };
+                updatePlayerList();
                 break;
-            case 'user_left':
-                delete connectedUsers[data.userId];
-                updateUserList();
+            
+            case 'player_left':
+                delete players[data.userId];
+                hostPlayerId = data.newHostId;
+                updatePlayerList();
                 break;
-            case 'beginPath':
-            case 'draw':
-                canvasHistory.push(data);
-                drawFromData(data);
+
+            case 'game_started':
+                showGameView('prompting');
+                break;
+
+            case 'error':
+                alert(`Server error: ${data.message}`);
                 break;
         }
     }
+    
+    // --- Event Listeners ---
+    startGameBtn.addEventListener('click', () => {
+        ws.send(JSON.stringify({ type: 'start_game' }));
+    });
+    
+    submitPromptBtn.addEventListener('click', () => {
+        const prompt = promptInput.value.trim();
+        if (prompt) {
+            ws.send(JSON.stringify({ type: 'submit_prompt', prompt: prompt }));
+            promptInput.classList.add('hidden');
 
-    // --- UI Logic ---
-    function updateUserList() {
-        userList.innerHTML = '';
-        Object.values(connectedUsers).forEach(username => {
-            const userItem = document.createElement('li');
-            userItem.textContent = username;
-            userList.appendChild(userItem);
-        });
-    }
-
-    function setCanvasSize() {
-        const mainContent = document.getElementById('main-content');
-        const toolbar = document.getElementById('toolbar');
-        canvas.width = mainContent.clientWidth;
-        canvas.height = mainContent.clientHeight - toolbar.offsetHeight;
-    }
-
-    // --- Drawing Functions ---
-    function startDrawing(e) {
-        isDrawing = true;
-        const { x, y } = getMousePos(e);
-        const command = { type: 'beginPath', x, y, color: colorPicker.value, size: brushSize.value };
-        ws.send(JSON.stringify(command));
-        canvasHistory.push(command);
-        drawFromData(command);
-    }
-
-    function draw(e) {
-        if (!isDrawing) return;
-        const { x, y } = getMousePos(e);
-        const command = { type: 'draw', x, y };
-        ws.send(JSON.stringify(command));
-        canvasHistory.push(command);
-        drawFromData(command);
-    }
-
-    function stopDrawing() { isDrawing = false; }
-
-    function drawFromData(data) {
-        if (data.type === 'beginPath') {
-            ctx.strokeStyle = data.color;
-            ctx.lineWidth = data.size;
-            ctx.beginPath();
-            ctx.moveTo(data.x, data.y);
-        } else if (data.type === 'draw') {
-            ctx.lineTo(data.x, data.y);
-            ctx.stroke();
+            submitPromptBtn.classList.add('hidden');
+            promptSubmittedMsg.classList.remove('hidden');
         }
-    }
+    });
 
-    function redrawCanvas(history) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        for (const command of history) {
-            drawFromData(command);
-        }
-    }
+    // --- Logic from previous steps (Home Screen, Modals) ---
+    // This part of the code is largely the same, but simplified to call the new functions.
+    // I am including the full, correct code here to avoid any confusion.
+    const createLobbyModal = document.getElementById('create-lobby-modal');
+    const usernameModal = document.getElementById('username-modal');
+    const cancelCreateBtn = document.getElementById('cancel-create-btn');
+    const createBtns = document.querySelectorAll('.create-btn');
+    const joinPrivateBtn = document.getElementById('join-private-btn');
+    const privateLobbyCodeInput = document.getElementById('private-lobby-code');
+    const joinLobbyBtn = document.getElementById('join-lobby-btn');
+    const usernameInput = document.getElementById('username-input');
 
-    function getMousePos(e) {
-        const rect = canvas.getBoundingClientRect();
-        const scaleX = canvas.width / rect.width;
-        const scaleY = canvas.height / rect.height;
-        return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
-    }
-
-    // --- ATTACH ALL EVENT LISTENERS ---
     showCreateLobbyBtn.addEventListener('click', () => {
-        console.log('Button clicked: "Create a New Lobby". Opening modal...');
-        views.createModal.classList.remove('hidden');
+        createLobbyModal.classList.remove('hidden');
     });
-
     cancelCreateBtn.addEventListener('click', () => {
-        views.createModal.classList.add('hidden');
+        createLobbyModal.classList.add('hidden');
     });
-
     createBtns.forEach(btn => {
-        btn.addEventListener('click', createLobby);
+        btn.addEventListener('click', async (e) => {
+            const type = e.target.dataset.type;
+            const response = await fetch('/api/lobbies', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ type: type })
+            });
+            const data = await response.json();
+            if (response.ok) {
+                currentLobbyId = data.lobbyId;
+                createLobbyModal.classList.add('hidden');
+                usernameModal.classList.remove('hidden');
+            } else {
+                alert(`Error: ${data.message}`);
+            }
+        });
     });
-
-    refreshLobbiesBtn.addEventListener('click', fetchPublicLobbies);
-
-    publicLobbyList.addEventListener('click', (e) => {
-        if (e.target.tagName === 'LI' && e.target.dataset.lobbyId) {
-            currentLobbyId = e.target.dataset.lobbyId;
-            showView('usernameModal');
-        }
-    });
-
     joinPrivateBtn.addEventListener('click', async () => {
         const code = privateLobbyCodeInput.value.trim();
-        if (!code) {
-            alert('Please enter a lobby code.');
-            return;
-        }
-        try {
-            const response = await fetch(`/api/lobbies/${code}`);
-            if (response.ok) {
-                currentLobbyId = code;
-                showView('usernameModal');
-            } else {
-                alert('Invalid lobby code. Please check the code and try again.');
-                privateLobbyCodeInput.value = '';
-            }
-        } catch (error) {
-            console.error('Error validating lobby code:', error);
-            alert('Could not connect to the server to validate the code.');
+        if (!code) return alert('Please enter a code.');
+        const response = await fetch(`/api/lobbies/${code}`);
+        if (response.ok) {
+            currentLobbyId = code;
+            usernameModal.classList.remove('hidden');
+        } else {
+            alert('Invalid lobby code.');
         }
     });
-
     joinLobbyBtn.addEventListener('click', () => {
         const username = usernameInput.value.trim();
-        if (!username) {
-            alert('Please enter a username.');
-            return;
-        }
-        if (!currentLobbyId) {
-            alert('No lobby selected!');
-            return;
-        }
-        lobbyCodeDisplay.textContent = currentLobbyId;
-        showView('app');
-        setCanvasSize();
+        if (!username) return alert('Please enter a username.');
+        if (!currentLobbyId) return alert('No lobby selected.');
+        usernameModal.classList.add('hidden');
         connectWebSocket(username, currentLobbyId);
     });
 
-    canvas.addEventListener('mousedown', startDrawing);
-    canvas.addEventListener('mousemove', draw);
-    canvas.addEventListener('mouseup', stopDrawing);
-    canvas.addEventListener('mouseout', stopDrawing);
-    brushSize.addEventListener('input', () => brushSizeValue.textContent = brushSize.value);
-
-    window.addEventListener('resize', () => {
-        if (!views.app.classList.contains('hidden')) {
-            setCanvasSize();
-            redrawCanvas(canvasHistory);
-        }
-    });
-
-    // --- INITIAL SETUP ---
+    // Initial setup
     showView('home');
-    fetchPublicLobbies();
 });
