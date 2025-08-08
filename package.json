@@ -1,0 +1,14 @@
+{
+  "name": "garlic-phone-clone",
+  "version": "1.0.0",
+  "description": "A frontend for a minimalist phone clone.",
+  "main": "index.html",
+  "scripts": {
+    "start": "lite-server"
+  },
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "lite-server": "^2.6.1"
+  }
+}
