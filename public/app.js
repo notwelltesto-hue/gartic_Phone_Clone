@@ -74,12 +74,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const w = gameCanvas.clientWidth;
             const h = gameCanvas.clientHeight;
             if (!w || !h) return;
+
             if (clientGameState === 'DRAWING') {
-                // In drawing mode, only clear the top area for the prompt
                 ctx.clearRect(0, 0, gameCanvas.width, 150);
             } else {
                 ctx.clearRect(0, 0, gameCanvas.width, gameCanvas.height);
             }
+            
             switch (clientGameState) {
                 case 'LOBBY': drawLobbyScreen(w, h); break;
                 case 'PROMPTING': drawPromptScreen(w, h); break;
@@ -225,7 +226,7 @@ document.addEventListener('DOMContentLoaded', () => {
             isDrawing = true;
             [lastX, lastY] = [pos.x, pos.y];
             const data = { type: 'beginPath', x: pos.x, y: pos.y, color: colorPicker.value, size: brushSize.value };
-            ws.send(JSON.stringify(data));
+            ws.send(JSON.stringify(_data));
             drawLine(pos.x - 0.01, pos.y, pos.x, pos.y, data.color, data.size);
         } else if (clientGameState === 'PROMPTING' && !promptSubmitted && currentPromptText) {
             const rect = gameCanvas.getBoundingClientRect();
@@ -266,7 +267,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('resize', () => { if (clientGameState !== 'HOME') { requestAnimationFrame(() => { setCanvasSize(); renderGameCanvas(); }); } });
     setInterval(() => { if (clientGameState === 'PROMPTING' && !promptSubmitted) renderGameCanvas() }, 500);
 
-    // --- FIX: The complete, restored Home Screen & Modal Logic ---
+    // --- FIX: The complete, syntactically correct Home Screen & Modal Logic ---
     showCreateLobbyBtn.addEventListener('click', () => {
         createLobbyModal.classList.remove('hidden');
     });
@@ -283,14 +284,16 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch('/api/lobbies', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ type })
+                body: JSON.stringify({ type: type })
             });
             const data = await response.json();
             if (response.ok) {
                 currentLobbyId = data.lobbyId;
                 createLobbyModal.classList.add('hidden');
                 usernameModal.classList.remove('hidden');
-            } else { alert(`Error: ${data.message}`); }
+            } else {
+                alert(`Error: ${data.message}`);
+            }
         });
     });
 
@@ -301,7 +304,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (response.ok) {
             currentLobbyId = code;
             usernameModal.classList.remove('hidden');
-        } else { alert('Invalid lobby code.'); }
+        } else {
+            alert('Invalid lobby code.');
+        }
     });
 
     joinLobbyBtn.addEventListener('click', () => {
