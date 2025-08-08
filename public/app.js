@@ -23,7 +23,6 @@ const joinLobbyBtn = document.getElementById('join-lobby-btn');
 
 // --- App Elements ---
 const lobbyCodeDisplay = document.getElementById('lobby-code-display');
-// (Other app elements like canvas, user-list, etc. are the same)
 const canvas = document.getElementById('drawing-canvas');
 const userList = document.getElementById('user-list');
 const colorPicker = document.getElementById('color-picker');
@@ -36,26 +35,30 @@ let currentLobbyId = null;
 let isDrawing = false;
 let ws;
 let connectedUsers = {};
+let canvasHistory = []; // Local cache for resizing
 
 // --- View Management ---
 function showView(viewName) {
     Object.values(views).forEach(view => view.style.display = 'none');
-    views[viewName].style.display = 'flex'; // Use flex for centering
+    if(views[viewName]) {
+        views[viewName].style.display = 'flex';
+    }
 }
 
 // --- API Calls ---
 async function fetchPublicLobbies() {
     try {
         const response = await fetch('/api/lobbies');
+        if (!response.ok) throw new Error('Failed to fetch');
         const lobbies = await response.json();
-        publicLobbyList.innerHTML = ''; // Clear old list
+        publicLobbyList.innerHTML = '';
         if (lobbies.length === 0) {
             publicLobbyList.innerHTML = '<li>No public lobbies found.</li>';
         } else {
             lobbies.forEach(lobby => {
                 const li = document.createElement('li');
                 li.textContent = `Lobby ${lobby.id} (${lobby.userCount} users)`;
-                li.dataset.lobbyId = lobby.id; // Store ID for joining
+                li.dataset.lobbyId = lobby.id;
                 publicLobbyList.appendChild(li);
             });
         }
@@ -73,13 +76,16 @@ async function createLobby(type) {
             body: JSON.stringify({ type: type })
         });
         const data = await response.json();
-        if (data.lobbyId) {
+        if (response.ok && data.lobbyId) {
             currentLobbyId = data.lobbyId;
+            views.createModal.style.display = 'none'; // Hide the modal
             showView('usernameModal');
+        } else {
+            alert(`Could not create lobby: ${data.message}`);
         }
     } catch (error) {
         console.error('Failed to create lobby:', error);
-        alert('Could not create lobby.');
+        alert('Could not create lobby. See console for details.');
     }
 }
 
@@ -110,13 +116,24 @@ publicLobbyList.addEventListener('click', (e) => {
     }
 });
 
-joinPrivateBtn.addEventListener('click', () => {
+joinPrivateBtn.addEventListener('click', async () => {
     const code = privateLobbyCodeInput.value.trim();
-    if (code) {
-        currentLobbyId = code;
-        showView('usernameModal');
-    } else {
+    if (!code) {
         alert('Please enter a lobby code.');
+        return;
+    }
+    try {
+        const response = await fetch(`/api/lobbies/${code}`);
+        if (response.ok) {
+            currentLobbyId = code;
+            showView('usernameModal');
+        } else {
+            alert('Invalid lobby code. Please check the code and try again.');
+            privateLobbyCodeInput.value = '';
+        }
+    } catch (error) {
+        console.error('Error validating lobby code:', error);
+        alert('Could not connect to the server to validate the code.');
     }
 });
 
@@ -130,18 +147,16 @@ joinLobbyBtn.addEventListener('click', () => {
         alert('No lobby selected!');
         return;
     }
-
     lobbyCodeDisplay.textContent = currentLobbyId;
     showView('app');
     setCanvasSize();
     connectWebSocket(username, currentLobbyId);
 });
 
-// --- WebSocket and Drawing Logic (Mostly unchanged, just wrapped in functions) ---
+// --- WebSocket Logic ---
 function connectWebSocket(username, lobbyId) {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(`${protocol}//${window.location.host}/draw/${lobbyId}`);
-
     ws.onopen = () => ws.send(JSON.stringify({ type: 'join', username }));
     ws.onmessage = handleWebSocketMessage;
     ws.onclose = () => {
@@ -155,7 +170,8 @@ function handleWebSocketMessage(event) {
     switch (data.type) {
         case 'initial_state':
             connectedUsers = data.users;
-            redrawCanvas(data.canvasHistory);
+            canvasHistory = data.canvasHistory; // Store history locally
+            redrawCanvas(canvasHistory);
             updateUserList();
             break;
         case 'user_joined':
@@ -168,17 +184,15 @@ function handleWebSocketMessage(event) {
             break;
         case 'beginPath':
         case 'draw':
+            canvasHistory.push(data); // Add to local history
             drawFromData(data);
             break;
     }
 }
 
-// ... (All drawing functions: startDrawing, draw, stopDrawing, drawFromData, redrawCanvas, getMousePos, setCanvasSize, etc., are identical to the previous step) ...
-// NOTE: Make sure to copy all those functions from the previous `app.js` file here. I've omitted them for brevity but they are required.
-
-// Helper to update UI list
+// --- UI Logic ---
 function updateUserList() {
-    userList.innerHTML = ''; // Clear the list
+    userList.innerHTML = '';
     Object.values(connectedUsers).forEach(username => {
         const userItem = document.createElement('li');
         userItem.textContent = username;
@@ -186,6 +200,12 @@ function updateUserList() {
     });
 }
 
+function setCanvasSize() {
+    const mainContent = document.getElementById('main-content');
+    const toolbar = document.getElementById('toolbar');
+    canvas.width = mainContent.clientWidth;
+    canvas.height = mainContent.clientHeight - toolbar.offsetHeight;
+}
 
 // --- Drawing Event Handlers ---
 canvas.addEventListener('mousedown', startDrawing);
@@ -196,16 +216,17 @@ brushSize.addEventListener('input', () => brushSizeValue.textContent = brushSize
 window.addEventListener('resize', () => {
     if (views.app.style.display === 'flex') {
         setCanvasSize();
-        redrawCanvas(canvasHistory); // You might need to store history locally or request it again
+        redrawCanvas(canvasHistory);
     }
 });
 
-// --- Drawing Functions (Same as before) ---
+// --- Drawing Functions ---
 function startDrawing(e) {
     isDrawing = true;
     const { x, y } = getMousePos(e);
     const command = { type: 'beginPath', x: x, y: y, color: colorPicker.value, size: brushSize.value };
     ws.send(JSON.stringify(command));
+    canvasHistory.push(command); // Add to local history immediately
     drawFromData(command);
 }
 
@@ -214,6 +235,7 @@ function draw(e) {
     const { x, y } = getMousePos(e);
     const command = { type: 'draw', x: x, y: y };
     ws.send(JSON.stringify(command));
+    canvasHistory.push(command);
     drawFromData(command);
 }
 
@@ -232,7 +254,7 @@ function drawFromData(data) {
 }
 
 function redrawCanvas(history) {
-    ctx.clearRect(0, 0, canvas.width, canvas.height); // Clear canvas before redrawing
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
     for (const command of history) {
         drawFromData(command);
     }
@@ -243,11 +265,4 @@ function getMousePos(e) {
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
     return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
-}
-
-function setCanvasSize() {
-    const mainContent = document.getElementById('main-content');
-    const toolbar = document.getElementById('toolbar');
-    canvas.width = mainContent.clientWidth;
-    canvas.height = mainContent.clientHeight - toolbar.offsetHeight;
 }
