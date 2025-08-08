@@ -8,25 +8,54 @@
 </head>
 <body>
 
-    <!-- Main container for all views -->
+    <!-- This root contains everything. We show/hide views inside it. -->
     <div id="app-root">
 
-        <!-- Home Screen -->
+        <!-- View 1: Home Screen -->
         <div id="home-screen" class="view">
-            <!-- (Content is the same as before) -->
+            <div class="home-container">
+                <h1>Welcome to DrawHub</h1>
+                <p>The collaborative drawing game.</p>
+                <div class="home-actions">
+                    <button id="show-create-lobby-btn">Create a New Lobby</button>
+                    <div class="join-private">
+                        <input type="text" id="private-lobby-code" placeholder="Enter lobby code...">
+                        <button id="join-private-btn">Join</button>
+                    </div>
+                </div>
+                <div class="public-lobbies">
+                    <h2>Public Lobbies</h2>
+                    <ul id="public-lobby-list">
+                        <!-- Lobbies will be populated here by JS -->
+                    </ul>
+                    <button id="refresh-lobbies-btn">Refresh List</button>
+                </div>
+            </div>
         </div>
 
-        <!-- Create Lobby Modal -->
+        <!-- View 2: Create Lobby Modal -->
         <div id="create-lobby-modal" class="modal-container hidden">
-            <!-- (Content is the same as before) -->
+            <div class="modal-content">
+                <h2>Create a Lobby</h2>
+                <p>Public lobbies are open for anyone to join. Private lobbies require a code.</p>
+                <div class="modal-actions">
+                    <button class="create-btn" data-type="public">Create Public</button>
+                    <button class="create-btn" data-type="private">Create Private</button>
+                </div>
+                <button id="cancel-create-btn">Cancel</button>
+            </div>
         </div>
 
-        <!-- Username Modal -->
+        <!-- View 3: Username Modal -->
         <div id="username-modal" class="modal-container hidden">
-            <!-- (Content is the same as before) -->
+            <div class="modal-content">
+                <h2>Choose Your Username</h2>
+                <input type="text" id="username-input" placeholder="Your Username" maxlength="15">
+                <button id="join-lobby-btn">Enter Lobby</button>
+            </div>
         </div>
 
-        <!-- Main Game View -->
+        <!-- View 4: Main Game Container -->
         <div id="game-container" class="view hidden">
             <aside id="sidebar">
                 <h3>Lobby Code: <b id="lobby-code-display"></b></h3>
@@ -52,9 +81,13 @@
 
                 <!-- Phase: Drawing Canvas -->
                 <div id="drawing-view" class="game-view hidden">
-                    <div id="draw-task">Describe: A happy robot</div>
+                    <div id="draw-task"></div>
                     <div id="toolbar">
-                        <!-- (Toolbar content is the same) -->
+                        <label for="color-picker">Color:</label>
+                        <input type="color" id="color-picker" value="#000000">
+                        <label for="brush-size">Size:</label>
+                        <input type="range" id="brush-size" min="1" max="50" value="5">
+                        <span id="brush-size-value">5</span>
                     </div>
                     <canvas id="drawing-canvas"></canvas>
                 </div>
