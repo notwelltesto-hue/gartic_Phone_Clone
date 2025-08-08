@@ -74,24 +74,16 @@ document.addEventListener('DOMContentLoaded', () => {
             const w = gameCanvas.clientWidth;
             const h = gameCanvas.clientHeight;
             if (!w || !h) return;
-
-            // In drawing mode, we only clear the top area for the prompt
             if (clientGameState === 'DRAWING') {
+                // In drawing mode, only clear the top area for the prompt
                 ctx.clearRect(0, 0, gameCanvas.width, 150);
             } else {
                 ctx.clearRect(0, 0, gameCanvas.width, gameCanvas.height);
             }
-            
             switch (clientGameState) {
-                case 'LOBBY':
-                    drawLobbyScreen(w, h);
-                    break;
-                case 'PROMPTING':
-                    drawPromptScreen(w, h);
-                    break;
-                case 'DRAWING':
-                    drawDrawingScreen(w, h, currentTask?.content || "Waiting for task...");
-                    break;
+                case 'LOBBY': drawLobbyScreen(w, h); break;
+                case 'PROMPTING': drawPromptScreen(w, h); break;
+                case 'DRAWING': drawDrawingScreen(w, h, currentTask?.content || "Waiting for task..."); break;
             }
         });
     }
@@ -170,15 +162,12 @@ document.addEventListener('DOMContentLoaded', () => {
         ws.onmessage = handleWebSocketMessage;
         ws.onclose = () => { alert('Connection lost. Returning home.'); window.location.reload(); };
     }
-
     function handleWebSocketMessage(event) {
         const data = JSON.parse(event.data);
         console.log('Received:', data);
         switch (data.type) {
             case 'initial_state':
-                myPlayerId = data.userId;
-                hostPlayerId = data.hostId;
-                players = data.players;
+                myPlayerId = data.userId; hostPlayerId = data.hostId; players = data.players;
                 lobbyCodeDisplay.textContent = currentLobbyId;
                 clientGameState = 'LOBBY';
                 showView('game');
@@ -190,8 +179,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 updatePlayerList();
                 break;
             case 'player_left':
-                delete players[data.userId];
-                hostPlayerId = data.newHostId;
+                delete players[data.userId]; hostPlayerId = data.newHostId;
                 updatePlayerList();
                 break;
             case 'game_started':
@@ -279,8 +267,14 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(() => { if (clientGameState === 'PROMPTING' && !promptSubmitted) renderGameCanvas() }, 500);
 
     // --- FIX: The complete, restored Home Screen & Modal Logic ---
-    showCreateLobbyBtn.addEventListener('click', () => createLobbyModal.classList.remove('hidden'));
-    cancelCreateBtn.addEventListener('click', () => createLobbyModal.classList.add('hidden');
+    showCreateLobbyBtn.addEventListener('click', () => {
+        createLobbyModal.classList.remove('hidden');
+    });
+
+    cancelCreateBtn.addEventListener('click', () => {
+        createLobbyModal.classList.add('hidden');
+    });
+
     refreshLobbiesBtn.addEventListener('click', fetchPublicLobbies);
     
     createBtns.forEach(btn => {
