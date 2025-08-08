@@ -9,6 +9,7 @@
   "dependencies": {
     "express": "^4.19.2",
     "express-ws": "^5.0.2",
+    "short-uuid": "^4.2.2",
     "uuid": "^9.0.1"
   },
   "author": "",
