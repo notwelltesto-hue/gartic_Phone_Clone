@@ -9,7 +9,7 @@ app.use(express.static('public'));
 const wsInstance = expressWs(app);
 
 const lobbies = {};
-const ROUND_TIME = 60000; // 60 seconds in milliseconds
+const ROUND_TIME = 60000; // 60 seconds
 
 // --- HTTP Routes ---
 app.post('/api/lobbies', (req, res) => {
@@ -25,7 +25,8 @@ app.post('/api/lobbies', (req, res) => {
         players: {},
         albums: [],
         roundTimer: null,
-        shuffledPlayerIds: []
+        shuffledPlayerIds: [],
+        revealState: null
     };
     console.log(`Lobby created: ${lobbyId} (Type: ${type})`);
     res.status(201).json({ lobbyId });
@@ -78,6 +79,9 @@ app.ws('/draw/:lobbyId', (ws, req) => {
                 break;
             case 'submit_description':
                 handleSubmitDescription(lobby, player, data.description, userId);
+                break;
+            case 'next_reveal_step':
+                handleNextRevealStep(lobby, userId);
                 break;
         }
     });
@@ -160,7 +164,7 @@ function handleSubmitDescription(lobby, player, description, userId) {
     }
 }
 
-// --- Round Management ---
+// --- Round & Reveal Management ---
 function checkRoundCompletion(lobby) {
     const playersInGame = Object.values(lobby.players);
     if (playersInGame.length === 0) return; // Don't proceed if lobby is empty
@@ -262,11 +266,34 @@ function startDescribingRound(lobby) {
 function startRevealPhase(lobby) {
     lobby.gameState = 'REVEAL';
     if (lobby.roundTimer) clearTimeout(lobby.roundTimer);
+    
+    // Set the initial reveal state on the server
+    lobby.revealState = { albumIndex: 0, stepIndex: 0 };
+    
     const finalAlbums = lobby.albums.map(album => ({
         originalAuthorName: lobby.players[album.originalAuthor]?.username || 'A mystery player',
         steps: album.steps
     }));
+    
+    // First, tell clients all the album data
     broadcast(lobby, { type: 'reveal_all', albums: finalAlbums });
+    // Then, tell them which specific step to show first
+    broadcast(lobby, { type: 'update_reveal_step', ...lobby.revealState });
+}
+
+function handleNextRevealStep(lobby, userId) {
+    if (lobby.gameState !== 'REVEAL' || userId !== lobby.hostId || !lobby.revealState) return;
+    
+    lobby.revealState.stepIndex++;
+    
+    const album = lobby.albums[lobby.revealState.albumIndex];
+    if (lobby.revealState.stepIndex >= album.steps.length) {
+        lobby.revealState.albumIndex = (lobby.revealState.albumIndex + 1) % lobby.albums.length;
+        lobby.revealState.stepIndex = 0;
+    }
+    
+    // Broadcast the new step to all players
+    broadcast(lobby, { type: 'update_reveal_step', ...lobby.revealState });
 }
 
 // --- Helper Functions ---
