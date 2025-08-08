@@ -35,7 +35,7 @@ let currentLobbyId = null;
 let isDrawing = false;
 let ws;
 let connectedUsers = {};
-let canvasHistory = []; // Local cache for resizing
+let canvasHistory = [];
 
 // --- View Management ---
 function showView(viewName) {
@@ -68,24 +68,53 @@ async function fetchPublicLobbies() {
     }
 }
 
-async function createLobby(type) {
+// --- THIS IS THE UPDATED FUNCTION ---
+async function createLobby(event) {
+    const button = event.target;
+    const type = button.dataset.type;
+    const originalText = button.textContent;
+
+    // 1. Provide visual feedback
+    button.disabled = true;
+    button.textContent = 'Creating...';
+
     try {
+        console.log(`[CLIENT] Sending request to create lobby of type: ${type}`);
         const response = await fetch('/api/lobbies', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ type: type })
         });
-        const data = await response.json();
-        if (response.ok && data.lobbyId) {
-            currentLobbyId = data.lobbyId;
-            views.createModal.style.display = 'none'; // Hide the modal
-            showView('usernameModal');
+
+        console.log(`[CLIENT] Received response with status: ${response.status}`);
+
+        // 2. Check if the server responded successfully
+        if (response.ok) {
+            const data = await response.json();
+            console.log('[CLIENT] Successfully parsed response data:', data);
+
+            if (data.lobbyId) {
+                // SUCCESS: Proceed to the next step
+                currentLobbyId = data.lobbyId;
+                views.createModal.style.display = 'none';
+                showView('usernameModal');
+            } else {
+                console.error('[CLIENT] Response was OK, but no lobbyId was found in data.');
+                alert('An unexpected server error occurred: Lobby ID was not returned.');
+            }
         } else {
-            alert(`Could not create lobby: ${data.message}`);
+            // 3. Handle server errors gracefully
+            const errorText = await response.text();
+            console.error(`[CLIENT] Server responded with an error: ${response.status}`, errorText);
+            alert(`Failed to create lobby. The server said: ${errorText}`);
         }
     } catch (error) {
-        console.error('Failed to create lobby:', error);
-        alert('Could not create lobby. See console for details.');
+        console.error('[CLIENT] A network error occurred:', error);
+        alert('A network error occurred. Please check your connection and the developer console for more info.');
+    } finally {
+        // 4. Always restore the button's state
+        button.disabled = false;
+        button.textContent = originalText;
     }
 }
 
@@ -103,8 +132,9 @@ cancelCreateBtn.addEventListener('click', () => {
     views.createModal.style.display = 'none';
 });
 
+// --- THIS EVENT LISTENER IS UPDATED ---
 createBtns.forEach(btn => {
-    btn.addEventListener('click', () => createLobby(btn.dataset.type));
+    btn.addEventListener('click', createLobby); // Pass the whole event
 });
 
 refreshLobbiesBtn.addEventListener('click', fetchPublicLobbies);
@@ -153,7 +183,7 @@ joinLobbyBtn.addEventListener('click', () => {
     connectWebSocket(username, currentLobbyId);
 });
 
-// --- WebSocket Logic ---
+// --- WebSocket Logic (UNCHANGED) ---
 function connectWebSocket(username, lobbyId) {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(`${protocol}//${window.location.host}/draw/${lobbyId}`);
@@ -170,7 +200,7 @@ function handleWebSocketMessage(event) {
     switch (data.type) {
         case 'initial_state':
             connectedUsers = data.users;
-            canvasHistory = data.canvasHistory; // Store history locally
+            canvasHistory = data.canvasHistory;
             redrawCanvas(canvasHistory);
             updateUserList();
             break;
@@ -184,13 +214,13 @@ function handleWebSocketMessage(event) {
             break;
         case 'beginPath':
         case 'draw':
-            canvasHistory.push(data); // Add to local history
+            canvasHistory.push(data);
             drawFromData(data);
             break;
     }
 }
 
-// --- UI Logic ---
+// --- UI Logic (UNCHANGED) ---
 function updateUserList() {
     userList.innerHTML = '';
     Object.values(connectedUsers).forEach(username => {
@@ -207,7 +237,7 @@ function setCanvasSize() {
     canvas.height = mainContent.clientHeight - toolbar.offsetHeight;
 }
 
-// --- Drawing Event Handlers ---
+// --- Drawing Event Handlers & Functions (UNCHANGED) ---
 canvas.addEventListener('mousedown', startDrawing);
 canvas.addEventListener('mousemove', draw);
 canvas.addEventListener('mouseup', stopDrawing);
@@ -220,13 +250,12 @@ window.addEventListener('resize', () => {
     }
 });
 
-// --- Drawing Functions ---
 function startDrawing(e) {
     isDrawing = true;
     const { x, y } = getMousePos(e);
     const command = { type: 'beginPath', x: x, y: y, color: colorPicker.value, size: brushSize.value };
     ws.send(JSON.stringify(command));
-    canvasHistory.push(command); // Add to local history immediately
+    canvasHistory.push(command);
     drawFromData(command);
 }
 
@@ -248,7 +277,7 @@ function drawFromData(data) {
         ctx.beginPath();
         ctx.moveTo(data.x, data.y);
     } else if (data.type === 'draw') {
-        ctx.lineTo(data.x, data.y);
+        ctx.lineTo(data.x, y);
         ctx.stroke();
     }
 }
