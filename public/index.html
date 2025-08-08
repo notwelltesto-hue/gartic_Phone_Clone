@@ -10,11 +10,10 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-
     <div id="app-root">
         <!-- Home Screen -->
         <div id="home-screen" class="view">
-             <div class="home-container">
+            <div class="home-container">
                 <h1>Welcome to DrawHub</h1>
                 <p>The collaborative drawing game.</p>
                 <div class="home-actions">
@@ -31,28 +30,9 @@
                 </div>
             </div>
         </div>
-
-        <!-- Create Lobby Modal -->
-        <div id="create-lobby-modal" class="modal-container hidden">
-            <div class="modal-content">
-                <h2>Create a Lobby</h2>
-                <div class="modal-actions">
-                    <button class="create-btn" data-type="public">Create Public</button>
-                    <button class="create-btn" data-type="private">Create Private</button>
-                </div>
-                <button id="cancel-create-btn">Cancel</button>
-            </div>
-        </div>
-
-        <!-- Username Modal -->
-        <div id="username-modal" class="modal-container hidden">
-            <div class="modal-content">
-                <h2>Choose Your Username</h2>
-                <input type="text" id="username-input" placeholder="Your Username" maxlength="15">
-                <button id="join-lobby-btn">Enter Lobby</button>
-            </div>
-        </div>
-
+        <!-- Modals -->
+        <div id="create-lobby-modal" class="modal-container hidden">...</div>
+        <div id="username-modal" class="modal-container hidden">...</div>
         <!-- Main Game Container -->
         <div id="game-container" class="view hidden">
             <aside id="sidebar">
@@ -60,13 +40,16 @@
                 <ul id="player-list"></ul>
                 <button id="start-game-btn" class="hidden">Start Game</button>
             </aside>
-
             <main id="main-content">
                 <canvas id="game-canvas"></canvas>
+                <!-- NEW: Drawing toolbar, hidden by default -->
+                <div id="drawing-toolbar" class="hidden">
+                    <input type="color" id="color-picker" value="#000000">
+                    <input type="range" id="brush-size" min="2" max="50" value="5">
+                </div>
             </main>
         </div>
     </div>
-    
     <script src="app.js"></script>
 </body>
 </html>
