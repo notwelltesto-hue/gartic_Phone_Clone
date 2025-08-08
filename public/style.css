@@ -29,8 +29,27 @@ button:hover { transform: translateY(-2px); box-shadow: 0 4px 10px rgba(0,0,0,0.
 #player-list li .role { color: #1a73e8; font-style: italic; font-weight: 400; }
 #start-game-btn { background-color: #34a853; color: white; font-size: 18px; margin-top: auto; }
 #start-game-btn:disabled { background-color: #a5d6a7; cursor: not-allowed; transform: none; box-shadow: none; }
-#drawing-toolbar { position: absolute; bottom: 40px; background-color: rgba(255, 255, 255, 0.9); backdrop-filter: blur(5px); border-radius: 12px; padding: 10px 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); display: flex; align-items: center; gap: 20px; }
+#drawing-toolbar { position: absolute; bottom: 40px; background-color: rgba(255, 255, 255, 0.9); backdrop-filter: blur(5px); border-radius: 12px; padding: 10px 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); display: flex; align-items: center; gap: 20px; z-index: 10;}
 #drawing-toolbar input[type="color"] { width: 40px; height: 40px; border: none; border-radius: 50%; cursor: pointer; padding: 0; overflow: hidden; }
 #drawing-toolbar input[type="range"] { cursor: pointer; }
 #timer-display { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.6); color: white; font-weight: 700; font-size: 24px; padding: 8px 20px; border-radius: 20px; z-index: 10; }
 #done-button { position: absolute; bottom: 120px; left: 50%; transform: translateX(-50%); background-color: #1a73e8; color: white; font-size: 18px; z-index: 10; }
+
+/* NEW: Progress bar for reveal animation */
+#reveal-progress-bar {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 80%;
+    height: 8px;
+    background-color: #ccc;
+    border-radius: 4px;
+    overflow: hidden;
+}
+#reveal-progress-fill {
+    width: 0%;
+    height: 100%;
+    background-color: #1a73e8;
+    transition: width 0.1s linear;
+}
