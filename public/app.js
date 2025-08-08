@@ -36,8 +36,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Styling Constants ---
     const COLORS = {
-        bg: '#e4e9f0',
-        canvas: '#ffffff',
         primary: '#1a73e8',
         green: '#34a853',
         gray: '#757575',
@@ -47,22 +45,37 @@ document.addEventListener('DOMContentLoaded', () => {
         white: '#ffffff',
     };
 
+    // --- NEW: A robust function to wait for an element to have a valid size ---
+    function waitForElementSize(element, timeout = 2000) {
+        return new Promise((resolve, reject) => {
+            let elapsed = 0;
+            const check = () => {
+                const rect = element.getBoundingClientRect();
+                if (rect.width > 1 && rect.height > 1) {
+                    resolve(rect); // Success!
+                } else if (elapsed < timeout) {
+                    elapsed += 50; // Check again in 50ms
+                    setTimeout(check, 50);
+                } else {
+                    reject(new Error("Element did not get a size in time."));
+                }
+            };
+            check();
+        });
+    }
+
     // --- Utility and Rendering Functions ---
     function wrapText(context, text, x, y, maxWidth, lineHeight, font, color, alignment = 'center') {
         context.font = font;
         context.fillStyle = color;
         context.textAlign = alignment;
-        
         const words = text.split(' ');
         let line = '';
-        let testLine;
         let currentY = y;
-
         for (let n = 0; n < words.length; n++) {
-            testLine = line + words[n] + ' ';
+            const testLine = line + words[n] + ' ';
             const metrics = context.measureText(testLine);
-            const testWidth = metrics.width;
-            if (testWidth > maxWidth && n > 0) {
+            if (metrics.width > maxWidth && n > 0) {
                 context.fillText(line, x, currentY);
                 line = words[n] + ' ';
                 currentY += lineHeight;
@@ -71,44 +84,43 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
         context.fillText(line, x, currentY);
-        return currentY;
     }
 
-    function setCanvasSize() {
-        const dpr = window.devicePixelRatio || 1;
-        const rect = gameCanvas.parentElement.getBoundingClientRect();
-
-        // Defensive check: if the container has no size, don't do anything.
-        if (rect.width === 0 || rect.height === 0) {
-            console.warn("Canvas parent has no size. Aborting resize.");
-            return;
+    async function setCanvasSize() {
+        try {
+            // Wait for the parent to be ready before measuring
+            const rect = await waitForElementSize(gameCanvas.parentElement);
+            const dpr = window.devicePixelRatio || 1;
+            const size = Math.min(rect.width - 40, rect.height - 40, 900);
+            gameCanvas.width = size * dpr;
+            gameCanvas.height = size * dpr;
+            ctx.scale(dpr, dpr);
+            gameCanvas.style.width = `${size}px`;
+            gameCanvas.style.height = `${size}px`;
+        } catch (error) {
+            console.error("Canvas sizing failed:", error);
+            alert("There was an error setting up the game area. Please try refreshing.");
         }
-
-        const size = Math.min(rect.width - 40, rect.height - 40, 900);
-        gameCanvas.width = size * dpr;
-        gameCanvas.height = size * dpr;
-        ctx.scale(dpr, dpr);
-        gameCanvas.style.width = `${size}px`;
-        gameCanvas.style.height = `${size}px`;
     }
 
     function renderGameCanvas() {
-        const w = gameCanvas.width / window.devicePixelRatio;
-        const h = gameCanvas.height / window.devicePixelRatio;
-        if (!w || !h) return; // Don't render if canvas has no size
-        ctx.clearRect(0, 0, w, h);
-        
-        switch (clientGameState) {
-            case 'LOBBY':
-                drawLobbyScreen(w, h);
-                break;
-            case 'PROMPTING':
-                drawPromptScreen(w, h);
-                break;
-            case 'DRAWING':
-                drawDrawingScreen(w, h, currentTask?.content || "Waiting for task...");
-                break;
-        }
+        requestAnimationFrame(() => {
+            const w = gameCanvas.width / (window.devicePixelRatio || 1);
+            const h = gameCanvas.height / (window.devicePixelRatio || 1);
+            if (!w || !h) return;
+            ctx.clearRect(0, 0, w, h);
+            switch (clientGameState) {
+                case 'LOBBY':
+                    drawLobbyScreen(w, h);
+                    break;
+                case 'PROMPTING':
+                    drawPromptScreen(w, h);
+                    break;
+                case 'DRAWING':
+                    drawDrawingScreen(w, h, currentTask?.content || "Waiting for task...");
+                    break;
+            }
+        });
     }
 
     function drawLobbyScreen(w, h) {
@@ -155,13 +167,11 @@ document.addEventListener('DOMContentLoaded', () => {
         return { x: (w - btnWidth) / 2, y, w: btnWidth, h: btnHeight };
     }
 
-    // --- View Management ---
     function showView(viewName) {
         for (const key in views) { views[key].classList.add('hidden'); }
         if (views[viewName]) { views[viewName].classList.remove('hidden'); }
     }
 
-    // --- UI Updates ---
     function updatePlayerList() {
         playerList.innerHTML = '';
         for (const id in players) {
@@ -193,7 +203,7 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
-    function handleWebSocketMessage(event) {
+    async function handleWebSocketMessage(event) {
         const data = JSON.parse(event.data);
         console.log('Received:', data);
 
@@ -205,14 +215,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 lobbyCodeDisplay.textContent = currentLobbyId;
                 clientGameState = 'LOBBY';
                 showView('game');
-
+                
                 // --- THE FIX ---
-                // We use requestAnimationFrame to ensure the browser has finished
-                // its layout calculations before we try to size the canvas.
-                requestAnimationFrame(() => {
-                    setCanvasSize();
-                    renderGameCanvas();
-                });
+                await setCanvasSize(); // Wait for the canvas to be sized correctly
+                renderGameCanvas();  // Then render it
                 // --- END FIX ---
 
                 updatePlayerList();
@@ -277,13 +283,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    window.addEventListener('resize', () => {
+    window.addEventListener('resize', async () => {
         if (clientGameState !== 'HOME') {
-            // Also use the robust method on resize
-            requestAnimationFrame(() => {
-                setCanvasSize();
-                renderGameCanvas();
-            });
+            await setCanvasSize();
+            renderGameCanvas();
         }
     });
 
