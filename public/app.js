@@ -7,7 +7,6 @@ document.addEventListener('DOMContentLoaded', () => {
     let players = {};
 
     // --- DOM Elements ---
-    const appRoot = document.getElementById('app-root');
     // Views
     const views = {
         home: document.getElementById('home-screen'),
@@ -15,14 +14,24 @@ document.addEventListener('DOMContentLoaded', () => {
         usernameModal: document.getElementById('username-modal'),
         game: document.getElementById('game-container'),
     };
-    // Game Views
+    // Game Sub-Views
     const gameViews = {
         waiting: document.getElementById('waiting-room-view'),
         prompting: document.getElementById('prompt-view'),
         drawing: document.getElementById('drawing-view'),
     };
-    // Other Elements
+    // Home/Modal Elements
     const showCreateLobbyBtn = document.getElementById('show-create-lobby-btn');
+    const createLobbyModal = document.getElementById('create-lobby-modal');
+    const usernameModal = document.getElementById('username-modal');
+    const cancelCreateBtn = document.getElementById('cancel-create-btn');
+    const createBtns = document.querySelectorAll('.create-btn');
+    const joinPrivateBtn = document.getElementById('join-private-btn');
+    const privateLobbyCodeInput = document.getElementById('private-lobby-code');
+    const joinLobbyBtn = document.getElementById('join-lobby-btn');
+    const usernameInput = document.getElementById('username-input');
+
+    // Game Elements
     const playerList = document.getElementById('player-list');
     const startGameBtn = document.getElementById('start-game-btn');
     const lobbyCodeDisplay = document.getElementById('lobby-code-display');
@@ -32,21 +41,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- View Management ---
     function showView(viewName) {
-        for (const key in views) {
-            views[key].classList.add('hidden');
-        }
-        if (views[viewName]) {
-            views[viewName].classList.remove('hidden');
-        }
+        for (const key in views) { views[key].classList.add('hidden'); }
+        if (views[viewName]) { views[viewName].classList.remove('hidden'); }
     }
 
     function showGameView(viewName) {
-        for (const key in gameViews) {
-            gameViews[key].classList.add('hidden');
-        }
-        if (gameViews[viewName]) {
-            gameViews[viewName].classList.remove('hidden');
-        }
+        for (const key in gameViews) { gameViews[key].classList.add('hidden'); }
+        if (gameViews[viewName]) { gameViews[viewName].classList.remove('hidden'); }
     }
 
     // --- UI Updates ---
@@ -69,7 +70,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Show/hide start button
         if (myPlayerId === hostPlayerId) {
             startGameBtn.classList.remove('hidden');
-            startGameBtn.disabled = Object.keys(players).length < 2; // Need at least 2 players
+            startGameBtn.disabled = Object.keys(players).length < 2;
         } else {
             startGameBtn.classList.add('hidden');
         }
@@ -119,6 +120,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 showGameView('prompting');
                 break;
 
+            case 'prompt_accepted':
+                promptInput.classList.add('hidden');
+                submitPromptBtn.classList.add('hidden');
+                promptSubmittedMsg.classList.remove('hidden');
+                break;
+
             case 'error':
                 alert(`Server error: ${data.message}`);
                 break;
@@ -134,25 +141,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const prompt = promptInput.value.trim();
         if (prompt) {
             ws.send(JSON.stringify({ type: 'submit_prompt', prompt: prompt }));
-            promptInput.classList.add('hidden');
-
-            submitPromptBtn.classList.add('hidden');
-            promptSubmittedMsg.classList.remove('hidden');
         }
     });
 
-    // --- Logic from previous steps (Home Screen, Modals) ---
-    // This part of the code is largely the same, but simplified to call the new functions.
-    // I am including the full, correct code here to avoid any confusion.
-    const createLobbyModal = document.getElementById('create-lobby-modal');
-    const usernameModal = document.getElementById('username-modal');
-    const cancelCreateBtn = document.getElementById('cancel-create-btn');
-    const createBtns = document.querySelectorAll('.create-btn');
-    const joinPrivateBtn = document.getElementById('join-private-btn');
-    const privateLobbyCodeInput = document.getElementById('private-lobby-code');
-    const joinLobbyBtn = document.getElementById('join-lobby-btn');
-    const usernameInput = document.getElementById('username-input');
-
+    // --- Home Screen & Modal Logic ---
     showCreateLobbyBtn.addEventListener('click', () => {
         createLobbyModal.classList.remove('hidden');
     });
@@ -196,6 +188,6 @@ document.addEventListener('DOMContentLoaded', () => {
         connectWebSocket(username, currentLobbyId);
     });
 
-    // Initial setup
+    // --- Initial Setup ---
     showView('home');
 });
