@@ -1,87 +1,153 @@
+// --- DOM Elements ---
 const usernameContainer = document.getElementById('username-container');
 const usernameInput = document.getElementById('username-input');
 const joinBtn = document.getElementById('join-btn');
-const canvasContainer = document.getElementById('canvas-container');
-const connectionStatus = document.getElementById('connection-status');
+const appContainer = document.getElementById('app-container');
 const canvas = document.getElementById('drawing-canvas');
+const userList = document.getElementById('user-list');
+
+// --- Toolbar Elements ---
+const colorPicker = document.getElementById('color-picker');
+const brushSize = document.getElementById('brush-size');
+const brushSizeValue = document.getElementById('brush-size-value');
+
+// --- Canvas & Drawing State ---
 const ctx = canvas.getContext('2d');
-
-let drawing = false;
+let isDrawing = false;
 let ws;
+const connectedUsers = {};
 
-joinBtn.addEventListener('click', () => {
-    const username = usernameInput.value.trim();
-    if (username) {
-        usernameContainer.style.display = 'none';
-        canvasContainer.style.display = 'block';
-        connectWebSocket(username);
-    }
-});
+// --- Utility Functions ---
+function setCanvasSize() {
+    canvas.width = canvas.offsetWidth;
+    canvas.height = canvas.offsetHeight;
+}
 
+// --- WebSocket Logic ---
 function connectWebSocket(username) {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(`${protocol}//${window.location.host}/draw`);
 
     ws.onopen = () => {
-        connectionStatus.textContent = `Connected as: ${username}`;
-        ws.send(JSON.stringify({ type: 'join', username: username }));
+        console.log('Connected to WebSocket server.');
+        const joinMessage = { type: 'user_join', username: username };
+        ws.send(JSON.stringify(joinMessage));
     };
 
     ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
-        if (data.type === 'draw') {
-            drawOnCanvas(data.x, data.y, data.prevX, data.prevY);
+
+        // Drawing actions
+        if (data.type === 'beginPath') {
+            ctx.strokeStyle = data.color;
+            ctx.lineWidth = data.size;
+            ctx.beginPath();
+            ctx.moveTo(data.x, data.y);
+        } else if (data.type === 'draw') {
+            ctx.lineTo(data.x, data.y);
+            ctx.stroke();
+        }
+
+        // User management
+        else if (data.type === 'user_join') {
+            connectedUsers[data.id] = data.username;
+            updateUserList();
+            // Send my info to the new user
+            ws.send(JSON.stringify({ type: 'user_join', username: usernameInput.value }));
+        } else if (data.type === 'user_leave') {
+            delete connectedUsers[data.id];
+            updateUserList();
         }
     };
 
     ws.onclose = () => {
-        connectionStatus.textContent = 'Disconnected from lobby.';
-    };
-
-    ws.onerror = (error) => {
-        console.error('WebSocket Error:', error);
-        connectionStatus.textContent = 'Connection error.';
+        console.log('Disconnected from server.');
+        alert('Connection lost. Please refresh the page.');
     };
 }
 
-canvas.addEventListener('mousedown', (e) => {
-    drawing = true;
+// --- Drawing Event Handlers ---
+function startDrawing(e) {
+    isDrawing = true;
     const { x, y } = getMousePos(e);
+    
+    // Draw on own canvas
+    ctx.strokeStyle = colorPicker.value;
+    ctx.lineWidth = brushSize.value;
     ctx.beginPath();
     ctx.moveTo(x, y);
-});
 
-canvas.addEventListener('mouseup', () => {
-    drawing = false;
-});
+    // Send data to other users
+    ws.send(JSON.stringify({
+        type: 'beginPath',
+        x: x,
+        y: y,
+        color: colorPicker.value,
+        size: brushSize.value
+    }));
+}
 
-canvas.addEventListener('mousemove', (e) => {
-    if (!drawing) return;
+function draw(e) {
+    if (!isDrawing) return;
     const { x, y } = getMousePos(e);
-    const { prevX, prevY } = getPreviousMousePos(e);
-    drawOnCanvas(x, y, prevX, prevY);
-    ws.send(JSON.stringify({ type: 'draw', x, y, prevX, prevY }));
-});
+    
+    // Draw on own canvas
+    ctx.lineTo(x, y);
+    ctx.stroke();
+
+    // Send data to other users
+    ws.send(JSON.stringify({ type: 'draw', x: x, y: y }));
+}
+
+function stopDrawing() {
+    isDrawing = false;
+}
 
 function getMousePos(e) {
     const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
     return {
-        x: e.clientX - rect.left,
-        y: e.clientY - rect.top
+        x: (e.clientX - rect.left) * scaleX,
+        y: (e.clientY - rect.top) * scaleY
     };
 }
 
-function getPreviousMousePos(e) {
-    const rect = canvas.getBoundingClientRect();
-    return {
-        prevX: e.clientX - rect.left - e.movementX,
-        prevY: e.clientY - rect.top - e.movementY
-    };
+// --- UI Logic ---
+function joinLobby() {
+    const username = usernameInput.value.trim();
+    if (username) {
+        usernameContainer.style.display = 'none';
+        appContainer.style.display = 'flex';
+        setCanvasSize();
+        connectWebSocket(username);
+    } else {
+        alert('Please enter a username.');
+    }
 }
 
-function drawOnCanvas(x, y, prevX, prevY) {
-    ctx.lineTo(x, y);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(x, y);
+function updateUserList() {
+    userList.innerHTML = '';
+    for (const id in connectedUsers) {
+        const userItem = document.createElement('li');
+        userItem.textContent = connectedUsers[id];
+        userList.appendChild(userItem);
+    }
 }
+
+// --- Event Listeners ---
+joinBtn.addEventListener('click', joinLobby);
+usernameInput.addEventListener('keyup', (e) => {
+    if (e.key === 'Enter') joinLobby();
+});
+
+canvas.addEventListener('mousedown', startDrawing);
+canvas.addEventListener('mousemove', draw);
+canvas.addEventListener('mouseup', stopDrawing);
+canvas.addEventListener('mouseout', stopDrawing); // Stop drawing if mouse leaves canvas
+
+brushSize.addEventListener('input', () => {
+    brushSizeValue.textContent = brushSize.value;
+});
+
+window.addEventListener('resize', setCanvasSize);
