@@ -3,18 +3,40 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gartic Phone Clone</title>
+    <title>DrawHub - Gartic Clone</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div id="username-container">
-        <input type="text" id="username-input" placeholder="Enter your username">
-        <button id="join-btn">Join Lobby</button>
+    <!-- Username Entry Screen -->
+    <div id="username-container" class="modal-container">
+        <div class="modal-content">
+            <h2>Welcome to DrawHub</h2>
+            <p>Please enter a username to join the lobby.</p>
+            <input type="text" id="username-input" placeholder="Your Username" maxlength="15">
+            <button id="join-btn">Join Drawing Session</button>
+        </div>
     </div>
 
-    <div id="canvas-container" style="display: none;">
-        <h3 id="connection-status">Connecting...</h3>
-        <canvas id="drawing-canvas" width="800" height="600"></canvas>
+    <!-- Main Application -->
+    <div id="app-container" style="display: none;">
+        <aside id="sidebar">
+            <h3>Connected Users</h3>
+            <ul id="user-list">
+                <!-- User list will be populated by JavaScript -->
+            </ul>
+        </aside>
+
+        <main id="main-content">
+            <div id="toolbar">
+                <label for="color-picker">Color:</label>
+                <input type="color" id="color-picker" value="#000000">
+
+                <label for="brush-size">Brush Size:</label>
+                <input type="range" id="brush-size" min="1" max="50" value="5">
+                <span id="brush-size-value">5</span>
+            </div>
+            <canvas id="drawing-canvas"></canvas>
+        </main>
     </div>
 
     <script src="app.js"></script>
