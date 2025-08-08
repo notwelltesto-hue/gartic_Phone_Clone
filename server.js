@@ -2,41 +2,39 @@ const express = require('express');
 const expressWs = require('express-ws');
 
 const app = express();
+// This line extends express with WebSocket capabilities
 const wsInstance = expressWs(app);
 
 app.use(express.static('public'));
 
-let lobby = new Set();
+// Use a Set for the lobby for efficient adding/deleting of users.
+const lobby = wsInstance.getWss().clients;
 
 app.ws('/draw', (ws, req) => {
-  // For this basic example, we'll just add the user to a single global lobby
   ws.on('message', (msg) => {
-    const data = JSON.parse(msg);
-
-    // When a user joins, add them to the lobby and store their username
-    if (data.type === 'join') {
-      ws.username = data.username;
-      lobby.add(ws);
-      console.log(`${ws.username} joined the lobby.`);
-    }
-
-    // When a user draws, broadcast the drawing data to everyone in the lobby
-    if (data.type === 'draw') {
-      lobby.forEach(client => {
-        if (client !== ws && client.readyState === ws.OPEN) {
-          client.send(JSON.stringify(data));
-        }
-      });
-    }
+    // We just broadcast any message received to all other clients.
+    // The client-side will be responsible for the logic.
+    lobby.forEach(client => {
+      if (client !== ws && client.readyState === client.OPEN) {
+        client.send(msg);
+      }
+    });
   });
 
   ws.on('close', () => {
-    // Remove the user from the lobby upon disconnection
-    lobby.delete(ws);
-    if (ws.username) {
-      console.log(`${ws.username} left the lobby.`);
-    }
+    console.log('Client disconnected.');
+    // Announce that a user has left to the remaining users.
+    const leaveMessage = JSON.stringify({ type: 'user_leave', id: ws.id });
+     lobby.forEach(client => {
+      if (client.readyState === client.OPEN) {
+        client.send(leaveMessage);
+      }
+    });
   });
+
+  // Assign a unique ID to each user for tracking
+  ws.id = Date.now();
+  console.log('Client connected with ID:', ws.id);
 });
 
 const PORT = process.env.PORT || 3000;
