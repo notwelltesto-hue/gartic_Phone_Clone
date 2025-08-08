@@ -16,12 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let lastY = 0;
 
     // --- DOM Elements ---
-    const views = {
-        home: document.getElementById('home-screen'),
-        createModal: document.getElementById('create-lobby-modal'),
-        usernameModal: document.getElementById('username-modal'),
-        game: document.getElementById('game-container')
-    };
+    const views = { home: document.getElementById('home-screen'), createModal: document.getElementById('create-lobby-modal'), usernameModal: document.getElementById('username-modal'), game: document.getElementById('game-container') };
     const gameCanvas = document.getElementById('game-canvas'), ctx = gameCanvas.getContext('2d');
     const drawingToolbar = document.getElementById('drawing-toolbar');
     const colorPicker = document.getElementById('color-picker');
@@ -80,7 +75,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const h = gameCanvas.clientHeight;
             if (!w || !h) return;
 
-            // In drawing mode, we don't clear the whole canvas, just the top text area
+            // In drawing mode, we only clear the top area for the prompt
             if (clientGameState === 'DRAWING') {
                 ctx.clearRect(0, 0, gameCanvas.width, 150);
             } else {
@@ -101,11 +96,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function drawLobbyScreen(w, h) {
-        wrapText(ctx, 'Waiting for players...', w / 2, h / 2 - 20, w * 0.8, 40, 'bold 32px Nunito', COLORS.darkGray);
-        wrapText(ctx, 'The host will start the game when everyone is ready.', w / 2, h / 2 + 30, w * 0.8, 24, '20px Nunito', COLORS.gray);
-    }
-
+    function drawLobbyScreen(w, h) { wrapText(ctx, 'Waiting for players...', w / 2, h / 2 - 20, w * 0.8, 40, 'bold 32px Nunito', COLORS.darkGray); wrapText(ctx, 'The host will start the game.', w / 2, h / 2 + 30, w * 0.8, 24, '20px Nunito', COLORS.gray); }
     function drawPromptScreen(w, h) {
         wrapText(ctx, 'Write something weird or funny!', w / 2, h * 0.15, w * 0.9, 36, 'bold 28px Nunito', COLORS.darkGray);
         const inputBoxY = h * 0.35;
@@ -117,10 +108,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.fillStyle = COLORS.text;
         ctx.textAlign = 'left';
         const now = Date.now();
-        if (now - lastBlinkTime > 500) {
-            cursorVisible = !cursorVisible;
-            lastBlinkTime = now;
-        }
+        if (now - lastBlinkTime > 500) { cursorVisible = !cursorVisible; lastBlinkTime = now; }
         const cursor = (cursorVisible && !promptSubmitted) ? '|' : '';
         ctx.fillText(currentPromptText + cursor, w * 0.1 + 15, inputBoxY + inputBoxHeight / 2 + 8);
         const buttonY = inputBoxY + inputBoxHeight + 30;
@@ -133,39 +121,17 @@ document.addEventListener('DOMContentLoaded', () => {
             wrapText(ctx, "Submitted! Waiting for others...", w / 2, buttonY + 25, w * 0.8, 30, 'bold 24px Nunito', COLORS.gray);
         }
     }
-
-    function drawDrawingScreen(w, h, prompt) {
-        wrapText(ctx, 'Your task to draw:', w / 2, h * 0.05, w * 0.9, 22, '18px Nunito', COLORS.darkGray);
-        wrapText(ctx, prompt, w / 2, h * 0.05 + 30, w * 0.9, 30, 'bold 24px Nunito', COLORS.primary);
-    }
+    function drawDrawingScreen(w, h, prompt) { wrapText(ctx, 'Your task to draw:', w / 2, h * 0.05, w * 0.9, 22, '18px Nunito', COLORS.darkGray); wrapText(ctx, prompt, w / 2, h * 0.05 + 30, w * 0.9, 30, 'bold 24px Nunito', COLORS.primary); }
+    function getSubmitButtonRect(w, h, y) { const btnWidth = w * 0.5; const btnHeight = 55; return { x: (w - btnWidth) / 2, y, w: btnWidth, h: btnHeight }; }
+    function drawLine(x0, y0, x1, y1, color, width) { ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'round'; ctx.stroke(); }
     
-    function drawLine(x0, y0, x1, y1, color, width) {
-        ctx.beginPath();
-        ctx.moveTo(x0, y0);
-        ctx.lineTo(x1, y1);
-        ctx.strokeStyle = color;
-        ctx.lineWidth = width;
-        ctx.lineCap = 'round';
-        ctx.stroke();
-    }
-
-    function getSubmitButtonRect(w, h, y) {
-        const btnWidth = w * 0.5;
-        const btnHeight = 55;
-        return { x: (w - btnWidth) / 2, y, w: btnWidth, h: btnHeight };
-    }
-
     // --- View Management and UI Updates ---
-    function showView(viewName) {
-        for (const key in views) { views[key].classList.add('hidden'); }
-        if (views[viewName]) { views[viewName].classList.remove('hidden'); }
-    }
+    function showView(viewName) { for (const key in views) { views[key].classList.add('hidden'); } if (views[viewName]) { views[viewName].classList.remove('hidden'); } }
     function updatePlayerList() {
         playerList.innerHTML = '';
         for (const id in players) {
-            const player = players[id];
             const li = document.createElement('li');
-            li.textContent = player.username;
+            li.textContent = players[id].username;
             if (id === myPlayerId) li.innerHTML += ' <span class="role">(You)</span>';
             if (id === hostPlayerId) li.innerHTML += ' <span class="role">(Host)</span>';
             playerList.appendChild(li);
@@ -192,10 +158,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     publicLobbyList.appendChild(li);
                 });
             }
-        } catch (error) {
-            console.error('Failed to fetch lobbies:', error);
-            publicLobbyList.innerHTML = '<li>Error loading lobbies.</li>';
-        }
+        } catch (error) { console.error('Failed to fetch lobbies:', error); publicLobbyList.innerHTML = '<li>Error loading lobbies.</li>'; }
     }
 
     // --- WebSocket Logic ---
@@ -205,16 +168,12 @@ document.addEventListener('DOMContentLoaded', () => {
         ws = new WebSocket(`${protocol}//${window.location.host}/draw/${lobbyId}`);
         ws.onopen = () => ws.send(JSON.stringify({ type: 'join', username }));
         ws.onmessage = handleWebSocketMessage;
-        ws.onclose = () => {
-            alert('Connection lost. Returning home.');
-            window.location.reload();
-        };
+        ws.onclose = () => { alert('Connection lost. Returning home.'); window.location.reload(); };
     }
 
     function handleWebSocketMessage(event) {
         const data = JSON.parse(event.data);
         console.log('Received:', data);
-
         switch (data.type) {
             case 'initial_state':
                 myPlayerId = data.userId;
@@ -223,10 +182,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 lobbyCodeDisplay.textContent = currentLobbyId;
                 clientGameState = 'LOBBY';
                 showView('game');
-                requestAnimationFrame(() => {
-                    setCanvasSize();
-                    renderGameCanvas();
-                });
+                requestAnimationFrame(() => { setCanvasSize(); renderGameCanvas(); });
                 updatePlayerList();
                 break;
             case 'player_joined':
@@ -254,7 +210,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     currentTask = data.task;
                     gameCanvas.style.cursor = 'crosshair';
                     drawingToolbar.classList.remove('hidden');
-                    // Clear canvas for drawing and render the new task prompt
                     ctx.clearRect(0, 0, gameCanvas.width, gameCanvas.height);
                     renderGameCanvas();
                 }
@@ -272,11 +227,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     // --- Event Listeners ---
-    function getMousePos(e) {
-        const rect = gameCanvas.getBoundingClientRect();
-        return { x: e.clientX - rect.left, y: e.clientY - rect.top };
-    }
-
+    function getMousePos(e) { const rect = gameCanvas.getBoundingClientRect(); return { x: e.clientX - rect.left, y: e.clientY - rect.top }; }
+    
     startGameBtn.addEventListener('click', () => ws.send(JSON.stringify({ type: 'start_game' })));
 
     gameCanvas.addEventListener('mousedown', (e) => {
@@ -323,18 +275,10 @@ document.addEventListener('DOMContentLoaded', () => {
         renderGameCanvas();
     });
 
-    window.addEventListener('resize', () => {
-        if (clientGameState !== 'HOME') {
-            requestAnimationFrame(() => {
-                setCanvasSize();
-                renderGameCanvas();
-            });
-        }
-    });
-
+    window.addEventListener('resize', () => { if (clientGameState !== 'HOME') { requestAnimationFrame(() => { setCanvasSize(); renderGameCanvas(); }); } });
     setInterval(() => { if (clientGameState === 'PROMPTING' && !promptSubmitted) renderGameCanvas() }, 500);
 
-    // --- Home Screen & Modal Logic ---
+    // --- FIX: The complete, restored Home Screen & Modal Logic ---
     showCreateLobbyBtn.addEventListener('click', () => createLobbyModal.classList.remove('hidden'));
     cancelCreateBtn.addEventListener('click', () => createLobbyModal.classList.add('hidden');
     refreshLobbiesBtn.addEventListener('click', fetchPublicLobbies);
