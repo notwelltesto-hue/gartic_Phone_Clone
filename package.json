@@ -1,14 +1,19 @@
 {
   "name": "gartic-phone-clone",
   "version": "1.0.0",
-  "description": "A drawing and guessing game.",
+  "description": "A real-time drawing game clone.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
-  "author": "",
-  "license": "ISC",
   "dependencies": {
-    "express": "^4.19.2"
-  }
+    "express": "^4.19.2",
+    "express-ws": "^5.0.2",
+    "ws": "^8.17.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  },
+  "author": "Your Name",
+  "license": "ISC"
 }
