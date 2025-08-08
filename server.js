@@ -11,13 +11,20 @@ const wsInstance = expressWs(app);
 // --- Server State: Manages multiple lobbies ---
 const lobbies = {};
 /*
-Lobby structure is now more robust:
+NEW Lobby Structure:
 {
   'lobbyId': {
     type: 'public' | 'private',
-    users: { 'userId': 'username' },
-    canvasHistory: [],
-    clients: new Set() // <-- Each lobby now manages its own clients
+    hostId: 'userId',           // The first player is the host
+    gameState: 'LOBBY',         // LOBBY | PROMPTING | PLAYING | REVEAL
+    players: {
+      'userId': {
+        username: 'name',
+        ws: WebSocket,          // Direct reference to the client
+        prompt: ''
+      }
+    },
+    canvasHistory: [] // Will be replaced by albums later
   }
 }
 */
@@ -31,9 +38,10 @@ app.post('/api/lobbies', (req, res) => {
     const lobbyId = short.generate();
     lobbies[lobbyId] = {
         type: type,
-        users: {},
-        canvasHistory: [],
-        clients: new Set() // Initialize the client set
+        hostId: null,
+        gameState: 'LOBBY',
+        players: {},
+        canvasHistory: []
     };
     console.log(`Lobby created: ${lobbyId} (Type: ${type})`);
     res.status(201).json({ lobbyId: lobbyId });
@@ -41,10 +49,10 @@ app.post('/api/lobbies', (req, res) => {
 
 app.get('/api/lobbies', (req, res) => {
     const publicLobbies = Object.entries(lobbies)
-        .filter(([id, lobby]) => lobby.type === 'public')
+        .filter(([, lobby]) => lobby.type === 'public' && lobby.gameState === 'LOBBY')
         .map(([id, lobby]) => ({
             id: id,
-            userCount: lobby.clients.size // Use the size of the client set
+            userCount: Object.keys(lobby.players).length
         }));
     res.json(publicLobbies);
 });
@@ -57,81 +65,100 @@ app.get('/api/lobbies/:lobbyId', (req, res) => {
     }
 });
 
-// --- WebSocket Route for Drawing in a Lobby ---
+
+// --- WebSocket Route ---
 app.ws('/draw/:lobbyId', (ws, req) => {
     const { lobbyId } = req.params;
     const lobby = lobbies[lobbyId];
+    if (!lobby) { return ws.close(); }
 
-    if (!lobby) {
-        console.log(`Connection rejected for non-existent lobby: ${lobbyId}`);
-        ws.close();
-        return;
-    }
-
-    // --- On Connection ---
     const userId = uuidv4();
     ws.id = userId;
-    lobby.clients.add(ws); // Add the WebSocket connection to the lobby's client set
 
-    // --- On Message ---
     ws.on('message', (msg) => {
         const data = JSON.parse(msg);
-        const currentLobby = lobbies[lobbyId];
-        if (!currentLobby) return; // Safety check
+        const player = lobby.players[userId];
+        if (!player) return; // Ignore messages from non-joined players
 
-        if (data.type === 'join') {
-            currentLobby.users[userId] = data.username;
-            console.log(`${data.username} joined lobby ${lobbyId}`);
+        // --- Game Actions ---
+        switch (data.type) {
+            case 'join':
+                // Check if game has started
+                if (lobby.gameState !== 'LOBBY') {
+                    ws.send(JSON.stringify({ type: 'error', message: 'Game has already started.' }));
+                    ws.close();
+                    return;
+                }
+                // Add player
+                lobby.players[userId] = { username: data.username, ws: ws, prompt: '' };
+                if (!lobby.hostId) { lobby.hostId = userId; } // First player is host
 
-            ws.send(JSON.stringify({
-                type: 'initial_state',
-                canvasHistory: currentLobby.canvasHistory,
-                users: currentLobby.users
-            }));
+                // Send initial state to the new player
+                ws.send(JSON.stringify({
+                    type: 'initial_state',
+                    userId: userId,
+                    hostId: lobby.hostId,
+                    players: getPlayerList(lobby)
+                }));
+                // Notify everyone else
+                broadcast(lobby, { type: 'player_joined', player: { id: userId, username: data.username } }, ws);
+                break;
 
-            broadcastToLobby(currentLobby, {
-                type: 'user_joined',
-                userId: userId,
-                username: data.username
-            }, ws);
-        } else if (data.type === 'beginPath' || data.type === 'draw') {
-            currentLobby.canvasHistory.push(data);
-            broadcastToLobby(currentLobby, data, ws);
+            case 'start_game':
+                if (userId === lobby.hostId && lobby.gameState === 'LOBBY') {
+                    console.log(`Game starting in lobby ${lobbyId}`);
+                    lobby.gameState = 'PROMPTING';
+                    broadcast(lobby, { type: 'game_started' });
+                }
+                break;
+            
+            case 'submit_prompt':
+                if (lobby.gameState === 'PROMPTING' && player) {
+                    player.prompt = data.prompt.slice(0, 100); // Sanitize prompt length
+                    console.log(`${player.username} submitted prompt: ${player.prompt}`);
+                    // Optional: check if all prompts are in to auto-advance
+                }
+                break;
         }
     });
 
-    // --- On Close ---
     ws.on('close', () => {
-        const currentLobby = lobbies[lobbyId];
-        if (!currentLobby) return; // Safety check
+        if (!lobby.players[userId]) return;
 
-        const username = currentLobby.users[userId];
-        console.log(`${username} has left lobby ${lobbyId}.`);
-        
-        // Clean up
-        currentLobby.clients.delete(ws);
-        delete currentLobby.users[userId];
+        const username = lobby.players[userId].username;
+        console.log(`${username} left lobby ${lobbyId}`);
+        delete lobby.players[userId];
 
-        // If lobby is now empty, delete it
-        if (currentLobby.clients.size === 0) {
-            console.log(`Lobby ${lobbyId} is empty and has been deleted.`);
+        if (Object.keys(lobby.players).length === 0) {
+            console.log(`Lobby ${lobbyId} is empty, deleting.`);
             delete lobbies[lobbyId];
         } else {
-            // Otherwise, notify remaining members
-            broadcastToLobby(currentLobby, { type: 'user_left', userId: userId });
+            // If the host left, assign a new host
+            if (lobby.hostId === userId) {
+                lobby.hostId = Object.keys(lobby.players)[0];
+            }
+            broadcast(lobby, { type: 'player_left', userId: userId, newHostId: lobby.hostId });
         }
     });
 });
 
-// --- Refactored Broadcast Function ---
-function broadcastToLobby(lobby, message, excludeWs) {
+// --- Helper Functions ---
+function getPlayerList(lobby) {
+    const playerList = {};
+    for (const id in lobby.players) {
+        playerList[id] = { username: lobby.players[id].username };
+    }
+    return playerList;
+}
+
+function broadcast(lobby, message, excludeWs) {
     const messageStr = JSON.stringify(message);
-    // Loop directly through the lobby's own client set - much more efficient!
-    lobby.clients.forEach(client => {
-        if (client.readyState === client.OPEN && client !== excludeWs) {
-            client.send(messageStr);
+    for (const id in lobby.players) {
+        const player = lobby.players[id];
+        if (player.ws !== excludeWs && player.ws.readyState === player.ws.OPEN) {
+            player.ws.send(messageStr);
         }
-    });
+    }
 }
 
 const PORT = process.env.PORT || 3000;
