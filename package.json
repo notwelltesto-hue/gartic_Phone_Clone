@@ -1,14 +1,14 @@
 {
-  "name": "garlic-phone-clone",
+  "name": "gartic-phone-clone",
   "version": "1.0.0",
-  "description": "A frontend for a minimalist phone clone.",
-  "main": "index.html",
+  "description": "A drawing and guessing game.",
+  "main": "server.js",
   "scripts": {
-    "start": "lite-server"
+    "start": "node server.js"
   },
   "author": "",
   "license": "ISC",
-  "devDependencies": {
-    "lite-server": "^2.6.1"
+  "dependencies": {
+    "express": "^4.19.2"
   }
 }
