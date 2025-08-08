@@ -47,7 +47,7 @@ document.addEventListener('DOMContentLoaded', () => {
         white: '#ffffff',
     };
 
-    // --- NEW: A robust text-wrapping utility function ---
+    // --- Utility and Rendering Functions ---
     function wrapText(context, text, x, y, maxWidth, lineHeight, font, color, alignment = 'center') {
         context.font = font;
         context.fillStyle = color;
@@ -71,10 +71,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
         context.fillText(line, x, currentY);
-        return currentY; // Return the Y position of the last line
+        return currentY;
     }
 
-    // --- Canvas UI Rendering ---
     function setCanvasSize() {
         const dpr = window.devicePixelRatio || 1;
         const rect = gameCanvas.parentElement.getBoundingClientRect();
@@ -111,21 +110,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function drawPromptScreen(w, h) {
         wrapText(ctx, 'Write something weird or funny!', w / 2, h * 0.15, w * 0.9, 36, 'bold 28px Nunito', COLORS.darkGray);
-
         const inputBoxY = h * 0.35;
         const inputBoxHeight = 60;
-        
-        // Text input box simulation
         ctx.strokeStyle = COLORS.lightGray;
         ctx.lineWidth = 2;
         ctx.strokeRect(w * 0.1, inputBoxY, w * 0.8, inputBoxHeight);
-        
-        // Text inside the box
         ctx.font = '24px Nunito';
         ctx.fillStyle = COLORS.text;
         ctx.textAlign = 'left';
-        
-        // Blinking cursor logic
         const now = Date.now();
         if (now - lastBlinkTime > 500) {
             cursorVisible = !cursorVisible;
@@ -133,8 +125,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         const cursor = (cursorVisible && !promptSubmitted) ? '|' : '';
         ctx.fillText(currentPromptText + cursor, w * 0.1 + 15, inputBoxY + inputBoxHeight / 2 + 8);
-        
-        // Button or submitted message
         const buttonY = inputBoxY + inputBoxHeight + 30;
         if (!promptSubmitted) {
             const btn = getSubmitButtonRect(w, h, buttonY);
@@ -149,7 +139,6 @@ document.addEventListener('DOMContentLoaded', () => {
     function drawDrawingScreen(w, h, prompt) {
         wrapText(ctx, 'Your task to draw:', w / 2, h * 0.05, w * 0.9, 22, '18px Nunito', COLORS.darkGray);
         wrapText(ctx, prompt, w / 2, h * 0.05 + 30, w * 0.9, 30, 'bold 24px Nunito', COLORS.primary);
-        // The rest of the space is for drawing
     }
 
     function getSubmitButtonRect(w, h, y) {
@@ -208,8 +197,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 lobbyCodeDisplay.textContent = currentLobbyId;
                 clientGameState = 'LOBBY';
                 showView('game');
-                setCanvasSize();
-                renderGameCanvas();
+                
+                // --- THE FIX ---
+                // We defer sizing and rendering. This gives the browser a moment
+                // to make the view visible, ensuring we get the correct dimensions.
+                setTimeout(() => {
+                    setCanvasSize();
+                    renderGameCanvas();
+                }, 0);
+                // --- END FIX ---
+
                 updatePlayerList();
                 break;
             case 'player_joined':
