@@ -29,7 +29,7 @@ NEW Lobby Structure:
 }
 */
 
-// --- HTTP Routes (Unchanged) ---
+// --- HTTP Routes ---
 app.post('/api/lobbies', (req, res) => {
     const { type } = req.body;
     if (type !== 'public' && type !== 'private') {
@@ -41,7 +41,7 @@ app.post('/api/lobbies', (req, res) => {
         hostId: null,
         gameState: 'LOBBY',
         players: {},
-        canvasHistory: []
+        canvasHistory: [] // Kept for now, will be replaced
     };
     console.log(`Lobby created: ${lobbyId} (Type: ${type})`);
     res.status(201).json({ lobbyId: lobbyId });
@@ -77,35 +77,38 @@ app.ws('/draw/:lobbyId', (ws, req) => {
 
     ws.on('message', (msg) => {
         const data = JSON.parse(msg);
+
+        // A player can only send messages if they are in the lobby players list
         const player = lobby.players[userId];
-        if (!player) return; // Ignore messages from non-joined players
+
+        // The 'join' message is special, as the player isn't in the list yet.
+        if (data.type === 'join') {
+            if (lobby.gameState !== 'LOBBY') {
+                ws.send(JSON.stringify({ type: 'error', message: 'Game has already started.' }));
+                return ws.close();
+            }
+            // Add player
+            lobby.players[userId] = { username: data.username, ws: ws, prompt: '' };
+            if (!lobby.hostId) { lobby.hostId = userId; } // First player is host
+
+            // Send initial state to the new player
+            ws.send(JSON.stringify({
+                type: 'initial_state',
+                userId: userId,
+                hostId: lobby.hostId,
+                players: getPlayerList(lobby)
+            }));
+            // Notify everyone else
+            broadcast(lobby, { type: 'player_joined', player: { id: userId, username: data.username } }, ws);
+            return; // End processing for 'join' message
+        }
+
+        if (!player) return; // For all other messages, ignore if player not found
 
         // --- Game Actions ---
         switch (data.type) {
-            case 'join':
-                // Check if game has started
-                if (lobby.gameState !== 'LOBBY') {
-                    ws.send(JSON.stringify({ type: 'error', message: 'Game has already started.' }));
-                    ws.close();
-                    return;
-                }
-                // Add player
-                lobby.players[userId] = { username: data.username, ws: ws, prompt: '' };
-                if (!lobby.hostId) { lobby.hostId = userId; } // First player is host
-
-                // Send initial state to the new player
-                ws.send(JSON.stringify({
-                    type: 'initial_state',
-                    userId: userId,
-                    hostId: lobby.hostId,
-                    players: getPlayerList(lobby)
-                }));
-                // Notify everyone else
-                broadcast(lobby, { type: 'player_joined', player: { id: userId, username: data.username } }, ws);
-                break;
-
             case 'start_game':
-                if (userId === lobby.hostId && lobby.gameState === 'LOBBY') {
+                if (userId === lobby.hostId && lobby.gameState === 'LOBBY' && Object.keys(lobby.players).length >= 2) {
                     console.log(`Game starting in lobby ${lobbyId}`);
                     lobby.gameState = 'PROMPTING';
                     broadcast(lobby, { type: 'game_started' });
@@ -116,7 +119,8 @@ app.ws('/draw/:lobbyId', (ws, req) => {
                 if (lobby.gameState === 'PROMPTING' && player) {
                     player.prompt = data.prompt.slice(0, 100); // Sanitize prompt length
                     console.log(`${player.username} submitted prompt: ${player.prompt}`);
-                    // Optional: check if all prompts are in to auto-advance
+                    // Let the client know the prompt was received
+                    ws.send(JSON.stringify({ type: 'prompt_accepted' }));
                 }
                 break;
         }
