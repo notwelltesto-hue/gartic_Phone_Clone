@@ -9,10 +9,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let isDrawing = false, lastX = 0, lastY = 0;
     let roundEndTime = 0, timerInterval;
     let drawingHistory = [];
-    let revealData = { albums: [], albumIndex: 0, stepIndex: 0 };
+    let allAlbums = []; // Stores the final album data sent by the server
+    let currentAlbumIndex = 0, currentStepIndex = 0; // State is now dictated by the server
     let animationState = { isAnimating: false, commands: [], index: 0, reqId: null };
     let lastBlinkTime = 0, cursorVisible = true;
-    let revealIsLocked = false;
 
     // --- DOM Elements ---
     const views = { home: document.getElementById('home-screen'), createModal: document.getElementById('create-lobby-modal'), usernameModal: document.getElementById('username-modal'), game: document.getElementById('game-container') };
@@ -44,7 +44,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const progressFill = createDynamicElement('div', 'reveal-progress-fill', progressBar);
     
     // --- Text-to-Speech ---
-    function speak(text, callback) { if ('speechSynthesis' in window && text) { speechSynthesis.cancel(); const utterance = new SpeechSynthesisUtterance(text); utterance.onend = callback; utterance.onerror = (e) => { console.error('TTS Error:', e.error); if(callback) callback(); }; speechSynthesis.speak(utterance); } else { setTimeout(callback, 1500); } }
+    function speak(text) { if ('speechSynthesis' in window && text) { speechSynthesis.cancel(); const utterance = new SpeechSynthesisUtterance(text); speechSynthesis.speak(utterance); } }
 
     // --- Drawing Animation Engine ---
     function animateDrawing(onComplete) { if (!animationState.isAnimating) return; const commands = animationState.commands; if (!commands || animationState.index >= commands.length) { animationState.isAnimating = false; if (onComplete) onComplete(); return; } for (let i = 0; i < 3; i++) { if (animationState.index >= commands.length) break; const cmd = commands[animationState.index]; if (cmd.type === 'beginPath') drawLine(cmd.x - 0.01, cmd.y, cmd.x, cmd.y, cmd.color, cmd.size); else if (cmd.type === 'draw') drawLine(cmd.x0, cmd.y0, cmd.x1, cmd.y1, cmd.color, cmd.size); animationState.index++; } progressFill.style.width = `${(animationState.index / commands.length) * 100}%`; animationState.reqId = requestAnimationFrame(() => animateDrawing(onComplete)); }
@@ -52,64 +52,28 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // --- Rendering Logic ---
     function setCanvasSize() { const dpr = window.devicePixelRatio || 1; const rect = gameCanvas.getBoundingClientRect(); gameCanvas.width = rect.width * dpr; gameCanvas.height = rect.height * dpr; ctx.scale(dpr, dpr); }
-    
-    function renderGameCanvas() {
-        requestAnimationFrame(() => {
-            const w = gameCanvas.clientWidth;
-            const h = gameCanvas.clientHeight;
-            if (!w || !h) return;
-            ctx.clearRect(0, 0, w, h);
-            switch (clientGameState) {
-                case 'LOBBY': drawLobbyScreen(w, h); break;
-                case 'PROMPTING': drawTextScreen(w, h, "Write something weird or funny!"); break;
-                case 'DESCRIBING': drawTextScreen(w, h, "Describe what you see!"); break;
-                case 'DRAWING': drawDrawingScreen(w, h); break;
-                case 'REVEAL': drawRevealScreen(w, h); break;
-            }
-        });
-    }
-
+    function renderGameCanvas() { requestAnimationFrame(() => { const w = gameCanvas.clientWidth, h = gameCanvas.clientHeight; if (!w || !h) return; ctx.clearRect(0, 0, w, h); switch (clientGameState) { case 'LOBBY': drawLobbyScreen(w, h); break; case 'PROMPTING': drawTextScreen(w, h, "Write something weird or funny!"); break; case 'DESCRIBING': drawTextScreen(w, h, "Describe what you see!"); break; case 'DRAWING': drawDrawingScreen(w, h); break; case 'REVEAL': drawRevealScreen(w, h); break; } }); }
     function wrapText(context, text, x, y, maxWidth, lineHeight, font, color, alignment = 'center') { context.font = font; context.fillStyle = color; context.textAlign = alignment; const words = (text || "").split(' '); let line = ''; let currentY = y; for (let n = 0; n < words.length; n++) { const testLine = line + words[n] + ' '; const metrics = context.measureText(testLine); if (metrics.width > maxWidth && n > 0) { context.fillText(line, x, currentY); line = words[n] + ' '; currentY += lineHeight; } else { line = testLine; } } context.fillText(line, x, currentY); }
     function drawLobbyScreen(w, h) { wrapText(ctx, 'Waiting for players...', w/2, h/2 - 20, w*0.8, 40, 'bold 32px Nunito', '#424242'); wrapText(ctx, 'The host will start the game.', w/2, h/2 + 30, w*0.8, 24, '20px Nunito', '#757575'); }
-    
-    // --- THIS IS THE FIXED FUNCTION ---
     function drawTextScreen(w, h, title) {
         wrapText(ctx, title, w/2, h*0.1, w*0.9, 36, 'bold 28px Nunito', '#424242');
-        
-        if (clientGameState === 'DESCRIBING' && currentTask?.content) {
-            // Statically draw the image to be described in the top half
-            const drawingCommands = currentTask.content;
-            if (drawingCommands.length > 0) {
-                drawingCommands.forEach(cmd => {
-                    if (cmd.type === 'beginPath') drawLine(cmd.x-0.01, cmd.y, cmd.x, cmd.y, cmd.color, cmd.size);
-                    else if (cmd.type === 'draw') drawLine(cmd.x0, cmd.y0, cmd.x1, cmd.y1, cmd.color, cmd.size);
-                });
-            } else {
-                 wrapText(ctx, "(The previous player drew nothing)", w/2, h/2 - 40, w*0.8, 24, 'italic 20px Nunito', '#757575');
-            }
-        }
-
+        if (clientGameState === 'DESCRIBING' && currentTask?.content) { (currentTask.content || []).forEach(cmd => { if (cmd.type === 'beginPath') drawLine(cmd.x-0.01, cmd.y, cmd.x, cmd.y, cmd.color, cmd.size); else if (cmd.type === 'draw') drawLine(cmd.x0, cmd.y0, cmd.x1, cmd.y1, cmd.color, cmd.size); }); }
         const inputBoxY = h * 0.7, inputBoxHeight = 60;
-        ctx.strokeStyle = '#bdbdbd'; ctx.lineWidth = 2;
-        ctx.strokeRect(w*0.1, inputBoxY, w*0.8, inputBoxHeight);
+        ctx.strokeStyle = '#bdbdbd'; ctx.lineWidth = 2; ctx.strokeRect(w*0.1, inputBoxY, w*0.8, inputBoxHeight);
         ctx.font = '24px Nunito'; ctx.fillStyle = '#212121'; ctx.textAlign = 'left';
         if (Date.now() - lastBlinkTime > 500) { cursorVisible = !cursorVisible; lastBlinkTime = Date.now(); }
         const cursor = (cursorVisible && !textSubmitted) ? '|' : '';
         ctx.fillText(currentText + cursor, w * 0.1 + 15, inputBoxY + inputBoxHeight / 2 + 8);
         const buttonY = inputBoxY + inputBoxHeight + 20;
-        
         if (!textSubmitted) {
             const btn = getSubmitButtonRect(w, h, buttonY);
             ctx.fillStyle = currentText ? '#34a853' : '#a5d6a7';
             ctx.fillRect(btn.x, btn.y, btn.w, btn.h);
             wrapText(ctx, 'Submit (Enter)', w/2, btn.y+35, btn.w, 30, 'bold 24px Nunito', '#ffffff');
         } else {
-            // After submitting, clear canvas and show waiting message
-            ctx.clearRect(0,0,w,h);
             wrapText(ctx, "Submitted! Waiting for others...", w/2, h/2, w*0.8, 30, 'bold 24px Nunito', '#757575');
         }
     }
-    
     function drawDrawingScreen(w, h) { if (currentTask) { wrapText(ctx, 'Your task to draw:', w/2, h*0.05, w*0.9, 22, '18px Nunito', '#424242'); wrapText(ctx, currentTask.content, w/2, h*0.05 + 30, w*0.9, 30, 'bold 24px Nunito', '#1a73e8'); } }
     function drawRevealScreen(w, h) { if (!allAlbums.length) return; const album = allAlbums[currentAlbumIndex]; wrapText(ctx, `Album ${currentAlbumIndex + 1}/${allAlbums.length} (by ${album.originalAuthorName})`, w/2, 30, w*0.9, 20, '16px Nunito', '#757575'); wrapText(ctx, `Step ${currentStepIndex + 1}/${album.steps.length}`, w/2, 55, w*0.9, 20, '16px Nunito', '#757575'); }
     function drawLine(x0, y0, x1, y1, color, width) { ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'round'; ctx.stroke(); }
@@ -184,25 +148,19 @@ document.addEventListener('DOMContentLoaded', () => {
     function getMousePos(e) { const rect = gameCanvas.getBoundingClientRect(); return { x: e.clientX - rect.left, y: e.clientY - rect.top }; }
     
     function advanceReveal() {
-        if (animationState.isAnimating || revealIsLocked) return;
+        if (animationState.isAnimating) return;
         const album = allAlbums[currentAlbumIndex];
         if (!album) return;
         const step = album.steps[currentStepIndex];
+        
         ctx.clearRect(0,0,gameCanvas.width, gameCanvas.height);
         drawRevealScreen(gameCanvas.clientWidth, gameCanvas.clientHeight);
+
         if (step.type === 'prompt') {
             progressBar.classList.add('hidden');
             const w = gameCanvas.clientWidth, h = gameCanvas.clientHeight;
             wrapText(ctx, step.content, w/2, h/2, w*0.8, 40, 'bold 32px Nunito', '#424242');
-            revealIsLocked = true;
-            speak(step.content, () => {
-                setTimeout(() => {
-                    revealIsLocked = false;
-                    if (myPlayerId === hostPlayerId) {
-                        ws.send(JSON.stringify({ type: 'next_reveal_step' }));
-                    }
-                }, 1200);
-            });
+            speak(step.content);
         } else if (step.type === 'drawing') {
             progressBar.classList.remove('hidden');
             startAnimation(step.content);
@@ -220,7 +178,6 @@ document.addEventListener('DOMContentLoaded', () => {
         doneButton.disabled = true;
     });
     
-    // --- THIS IS THE FIXED FUNCTION ---
     gameCanvas.addEventListener('mousedown', (e) => {
         const pos = getMousePos(e);
         if (clientGameState === 'DRAWING') {
@@ -231,21 +188,19 @@ document.addEventListener('DOMContentLoaded', () => {
             drawLine(pos.x - 0.01, pos.y, pos.x, pos.y, data.color, data.size);
         } else if ((clientGameState === 'PROMPTING' || clientGameState === 'DESCRIBING') && !textSubmitted && currentText) {
             const rect = gameCanvas.getBoundingClientRect(), w = rect.width, h = rect.height;
-            // The Y coordinate calculation for the button is now the same for both text screens
-            const buttonY = h * 0.7 + 60 + 20; 
-            const btn = getSubmitButtonRect(w, h, buttonY);
+            const btnY = h * 0.7 + 60 + 20;
+            const btn = getSubmitButtonRect(w, h, btnY);
             if (pos.x > btn.x && pos.x < btn.x + btn.w && pos.y > btn.y && pos.y < btn.y + btn.h) {
                 if(clientGameState === 'PROMPTING') ws.send(JSON.stringify({ type: 'submit_prompt', prompt: currentText }));
                 else if (clientGameState === 'DESCRIBING') ws.send(JSON.stringify({ type: 'submit_description', description: currentText }));
             }
         } else if (clientGameState === 'REVEAL') {
-            if (revealIsLocked || animationState.isAnimating) return;
-            if (myPlayerId === hostPlayerId) {
+            // Only the host can advance the reveal, and only if it's not animating
+            if (myPlayerId === hostPlayerId && !animationState.isAnimating) {
                 ws.send(JSON.stringify({ type: 'next_reveal_step' }));
             }
         }
     });
-
     gameCanvas.addEventListener('mousemove', (e) => {
         if (!isDrawing || clientGameState !== 'DRAWING') return;
         const pos = getMousePos(e);
