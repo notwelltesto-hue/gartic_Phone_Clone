@@ -31,7 +31,7 @@
             </div>
         </div>
 
-        <!-- Modals -->
+        <!-- Create Lobby Modal -->
         <div id="create-lobby-modal" class="modal-container hidden">
             <div class="modal-content">
                 <h2>Create a Lobby</h2>
@@ -42,6 +42,8 @@
                 <button id="cancel-create-btn">Cancel</button>
             </div>
         </div>
+
+        <!-- Username Modal -->
         <div id="username-modal" class="modal-container hidden">
             <div class="modal-content">
                 <h2>Choose Your Username</h2>
@@ -59,11 +61,12 @@
             </aside>
             <main id="main-content">
                 <canvas id="game-canvas"></canvas>
-                <!-- FIX: Drawing toolbar is back, but hidden until needed -->
                 <div id="drawing-toolbar" class="hidden">
                     <input type="color" id="color-picker" value="#000000">
                     <input type="range" id="brush-size" min="2" max="50" value="5">
                 </div>
+                <!-- This container will be used for the chat-style reveal -->
+                <div id="reveal-container" class="hidden"></div>
             </main>
         </div>
     </div>
