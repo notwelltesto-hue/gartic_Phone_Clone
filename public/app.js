@@ -11,6 +11,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let drawingHistory = [];
     let allAlbums = [];
     let currentAlbumIndex = 0, currentStepIndex = 0;
+    let lastBlinkTime = 0, cursorVisible = true;
 
     // --- DOM Elements ---
     const views = { home: document.getElementById('home-screen'), createModal: document.getElementById('create-lobby-modal'), usernameModal: document.getElementById('username-modal'), game: document.getElementById('game-container') };
@@ -35,17 +36,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const publicLobbyList = document.getElementById('public-lobby-list');
     const refreshLobbiesBtn = document.getElementById('refresh-lobbies-btn');
 
-    // --- Dynamic UI & Template Creation ---
+    // --- Dynamic UI Creation ---
     function createDynamicElement(tag, id, parent) { let el = document.getElementById(id); if (!el) { el = document.createElement(tag); el.id = id; parent.appendChild(el); } return el; }
     const doneButton = createDynamicElement('button', 'done-button', mainContent);
     const timerDisplay = createDynamicElement('div', 'timer-display', mainContent);
-
-    // --- NEW: Create a single, hidden canvas to use as a template for reveals ---
+    
+    // --- Reusable Canvas Template for Reveals ---
     const revealCanvasTemplate = document.createElement('canvas');
     revealCanvasTemplate.width = 500;
     revealCanvasTemplate.height = 500;
     const revealCtx = revealCanvasTemplate.getContext('2d');
-    
+
     // --- Text-to-Speech ---
     function speak(text) { if ('speechSynthesis' in window && text) { speechSynthesis.cancel(); const utterance = new SpeechSynthesisUtterance(text); speechSynthesis.speak(utterance); } }
 
@@ -86,8 +87,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!allAlbums.length) return;
         const album = allAlbums[currentAlbumIndex];
         const step = album.steps[currentStepIndex];
+
         const stepDiv = document.createElement('div');
         stepDiv.classList.add('reveal-step');
+        
         const authorDiv = document.createElement('div');
         authorDiv.classList.add('reveal-author');
         authorDiv.textContent = `${step.author} ${step.type === 'prompt' ? 'wrote' : 'drew'}:`;
@@ -104,12 +107,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const img = document.createElement('img');
             img.classList.add('reveal-drawing-img');
             
-            // --- THIS IS THE FIX ---
-            // Draw on the hidden template canvas, then get the result as an image
-            revealCtx.clearRect(0,0, revealCanvasTemplate.width, revealCanvasTemplate.height);
+            revealCtx.clearRect(0, 0, revealCanvasTemplate.width, revealCanvasTemplate.height);
             (step.content || []).forEach(cmd => {
-                if (cmd.type === 'beginPath') { revealCtx.beginPath(); revealCtx.moveTo(cmd.x, cmd.y); revealCtx.lineTo(cmd.x, cmd.y); revealCtx.strokeStyle = cmd.color; revealCtx.lineWidth = cmd.size; revealCtx.lineCap = 'round'; revealCtx.stroke(); }
-                else if (cmd.type === 'draw') { revealCtx.beginPath(); revealCtx.moveTo(cmd.x0, cmd.y0); revealCtx.lineTo(cmd.x1, cmd.y1); revealCtx.strokeStyle = cmd.color; revealCtx.lineWidth = cmd.size; revealCtx.lineCap = 'round'; revealCtx.stroke(); }
+                const tempCtx = revealCtx; // Use the single template context
+                if (cmd.type === 'beginPath') { tempCtx.beginPath(); tempCtx.moveTo(cmd.x, cmd.y); tempCtx.lineTo(cmd.x, cmd.y); tempCtx.strokeStyle = cmd.color; tempCtx.lineWidth = cmd.size; tempCtx.lineCap = 'round'; tempCtx.stroke(); }
+                else if (cmd.type === 'draw') { tempCtx.beginPath(); tempCtx.moveTo(cmd.x0, cmd.y0); tempCtx.lineTo(cmd.x1, cmd.y1); tempCtx.strokeStyle = cmd.color; tempCtx.lineWidth = cmd.size; tempCtx.lineCap = 'round'; tempCtx.stroke(); }
             });
             img.src = revealCanvasTemplate.toDataURL();
             stepDiv.appendChild(img);
