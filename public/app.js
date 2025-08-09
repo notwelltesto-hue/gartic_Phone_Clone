@@ -9,7 +9,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let isDrawing = false, lastX = 0, lastY = 0;
     let roundEndTime = 0, timerInterval;
     let drawingHistory = [];
-    let revealData = { albums: [], albumIndex: 0, stepIndex: 0 };
+    let allAlbums = []; // Stores the final album data sent by the server
+    let currentAlbumIndex = 0, currentStepIndex = 0; // State is now dictated by server
     let animationState = { isAnimating: false, commands: [], index: 0, reqId: null };
     let lastBlinkTime = 0, cursorVisible = true;
     let revealIsLocked = false; // Prevents clicks during auto-advance
@@ -51,7 +52,7 @@ document.addEventListener('DOMContentLoaded', () => {
             utterance.onend = callback;
             utterance.onerror = (e) => {
                 console.error('TTS Error:', e.error);
-                if (callback) callback(); // Ensure callback is always called
+                if(callback) callback(); // Ensure callback is always called
             };
             speechSynthesis.speak(utterance);
         } else {
@@ -69,8 +70,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (onComplete) onComplete();
             return;
         }
-        // Draw a few commands per frame for speed
-        for (let i = 0; i < 3; i++) {
+        for (let i = 0; i < 3; i++) { // Draw 3 commands per frame for speed
             if (animationState.index >= commands.length) break;
             const cmd = commands[animationState.index];
             if (cmd.type === 'beginPath') drawLine(cmd.x - 0.01, cmd.y, cmd.x, cmd.y, cmd.color, cmd.size);
@@ -80,6 +80,7 @@ document.addEventListener('DOMContentLoaded', () => {
         progressFill.style.width = `${(animationState.index / commands.length) * 100}%`;
         animationState.reqId = requestAnimationFrame(() => animateDrawing(onComplete));
     }
+
     function startAnimation(commands, onComplete) {
         if (animationState.reqId) cancelAnimationFrame(animationState.reqId);
         ctx.clearRect(0,0,gameCanvas.width, gameCanvas.height);
@@ -89,13 +90,14 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // --- Rendering Logic ---
     function setCanvasSize() { const dpr = window.devicePixelRatio || 1; const rect = gameCanvas.getBoundingClientRect(); gameCanvas.width = rect.width * dpr; gameCanvas.height = rect.height * dpr; ctx.scale(dpr, dpr); }
+    
     function renderGameCanvas() {
         requestAnimationFrame(() => {
             const w = gameCanvas.clientWidth;
             const h = gameCanvas.clientHeight;
             if (!w || !h) return;
 
-            // Clear the whole canvas before drawing the current state's UI
+            // Always clear the canvas before drawing the current state's UI
             ctx.clearRect(0, 0, w, h);
 
             switch (clientGameState) {
@@ -118,28 +120,16 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function wrapText(context, text, x, y, maxWidth, lineHeight, font, color, alignment = 'center') { context.font = font; context.fillStyle = color; context.textAlign = alignment; const words = text.split(' '); let line = ''; let currentY = y; for (let n = 0; n < words.length; n++) { const testLine = line + words[n] + ' '; const metrics = context.measureText(testLine); if (metrics.width > maxWidth && n > 0) { context.fillText(line, x, currentY); line = words[n] + ' '; currentY += lineHeight; } else { line = testLine; } } context.fillText(line, x, currentY); }
+    function wrapText(context, text, x, y, maxWidth, lineHeight, font, color, alignment = 'center') { context.font = font; context.fillStyle = color; context.textAlign = alignment; const words = (text || "").split(' '); let line = ''; let currentY = y; for (let n = 0; n < words.length; n++) { const testLine = line + words[n] + ' '; const metrics = context.measureText(testLine); if (metrics.width > maxWidth && n > 0) { context.fillText(line, x, currentY); line = words[n] + ' '; currentY += lineHeight; } else { line = testLine; } } context.fillText(line, x, currentY); }
     function drawLobbyScreen(w, h) { wrapText(ctx, 'Waiting for players...', w/2, h/2 - 20, w*0.8, 40, 'bold 32px Nunito', '#424242'); wrapText(ctx, 'The host will start the game.', w/2, h/2 + 30, w*0.8, 24, '20px Nunito', '#757575'); }
+    
     function drawTextScreen(w, h, title) {
         wrapText(ctx, title, w/2, h*0.1, w*0.9, 36, 'bold 28px Nunito', '#424242');
         
         if (clientGameState === 'DESCRIBING' && currentTask?.content) {
-            // Statically draw the image to be described, scaled to fit
-            const drawingCommands = currentTask.content;
-            const bounds = { minX: w, minY: h, maxX: 0, maxY: 0 };
-            drawingCommands.forEach(cmd => {
-                if (cmd.type === 'beginPath') { bounds.minX = Math.min(bounds.minX, cmd.x); bounds.maxX = Math.max(bounds.maxX, cmd.x); bounds.minY = Math.min(bounds.minY, cmd.y); bounds.maxY = Math.max(bounds.maxY, cmd.y); }
-                else if (cmd.type === 'draw') { bounds.minX = Math.min(bounds.minX, cmd.x1); bounds.maxX = Math.max(bounds.maxX, cmd.x1); bounds.minY = Math.min(bounds.minY, cmd.y1); bounds.maxY = Math.max(bounds.maxY, cmd.y1); }
-            });
-            const drawingW = bounds.maxX - bounds.minX;
-            const drawingH = bounds.maxY - bounds.minY;
-            const scale = Math.min((w*0.8) / drawingW, (h*0.5) / drawingH);
-            const offsetX = (w - drawingW * scale) / 2 - bounds.minX * scale;
-            const offsetY = (h*0.4) - (drawingH * scale)/2 - bounds.minY * scale;
-
-            drawingCommands.forEach(cmd => {
-                if (cmd.type === 'beginPath') drawLine(cmd.x*scale+offsetX - 0.01, cmd.y*scale+offsetY, cmd.x*scale+offsetX, cmd.y*scale+offsetY, cmd.color, cmd.size*scale);
-                else if (cmd.type === 'draw') drawLine(cmd.x0*scale+offsetX, cmd.y0*scale+offsetY, cmd.x1*scale+offsetX, cmd.y1*scale+offsetY, cmd.color, cmd.size*scale);
+            (currentTask.content || []).forEach(cmd => {
+                if (cmd.type === 'beginPath') drawLine(cmd.x-0.01, cmd.y, cmd.x, cmd.y, cmd.color, cmd.size);
+                else if (cmd.type === 'draw') drawLine(cmd.x0, cmd.y0, cmd.x1, cmd.y1, cmd.color, cmd.size);
             });
         }
 
@@ -158,13 +148,12 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.fillRect(btn.x, btn.y, btn.w, btn.h);
             wrapText(ctx, 'Submit (Enter)', w/2, btn.y+35, btn.w, 30, 'bold 24px Nunito', '#ffffff');
         } else {
-            // After submitting, clear the canvas and show waiting message
-            ctx.clearRect(0,0,w,h);
             wrapText(ctx, "Submitted! Waiting for others...", w/2, h/2, w*0.8, 30, 'bold 24px Nunito', '#757575');
         }
     }
+
     function drawDrawingScreen(w, h) { if (currentTask) { wrapText(ctx, 'Your task to draw:', w/2, h*0.05, w*0.9, 22, '18px Nunito', '#424242'); wrapText(ctx, currentTask.content, w/2, h*0.05 + 30, w*0.9, 30, 'bold 24px Nunito', '#1a73e8'); } }
-    function drawRevealScreen(w, h) { if (!revealData.albums.length) return; const album = revealData.albums[revealData.albumIndex]; wrapText(ctx, `Album ${revealData.albumIndex + 1}/${revealData.albums.length} (by ${album.originalAuthorName})`, w/2, 30, w*0.9, 20, '16px Nunito', '#757575'); wrapText(ctx, `Step ${revealData.stepIndex + 1}/${album.steps.length}`, w/2, 55, w*0.9, 20, '16px Nunito', '#757575'); }
+    function drawRevealScreen(w, h) { if (!allAlbums.length) return; const album = allAlbums[currentAlbumIndex]; wrapText(ctx, `Album ${currentAlbumIndex + 1}/${allAlbums.length} (by ${album.originalAuthorName})`, w/2, 30, w*0.9, 20, '16px Nunito', '#757575'); wrapText(ctx, `Step ${currentStepIndex + 1}/${album.steps.length}`, w/2, 55, w*0.9, 20, '16px Nunito', '#757575'); }
     function drawLine(x0, y0, x1, y1, color, width) { ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'round'; ctx.stroke(); }
     function getSubmitButtonRect(w, h, y) { const btnW = w * 0.5, btnH = 55; return { x: (w - btnW)/2, y: y, w: btnW, h: btnH }; }
 
@@ -216,12 +205,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 break;
             case 'reveal_all':
                 clientGameState = 'REVEAL';
-                revealData = { albums: data.albums, albumIndex: 0, stepIndex: 0 };
+                allAlbums = data.albums;
                 stopTimer();
                 drawingToolbar.classList.add('hidden');
                 doneButton.classList.add('hidden');
                 progressBar.classList.remove('hidden');
                 gameCanvas.style.cursor = 'pointer';
+                break;
+            case 'update_reveal_step':
+                currentAlbumIndex = data.albumIndex;
+                currentStepIndex = data.stepIndex;
                 advanceReveal();
                 break;
             case 'error': alert(`Server error: ${data.message}`); break;
@@ -234,11 +227,13 @@ document.addEventListener('DOMContentLoaded', () => {
     
     function advanceReveal() {
         if (animationState.isAnimating || revealIsLocked) return;
-        const album = revealData.albums[revealData.albumIndex];
+        const album = allAlbums[currentAlbumIndex];
         if (!album) return;
-        const step = album.steps[revealData.stepIndex];
+        const step = album.steps[currentStepIndex];
+        
         ctx.clearRect(0,0,gameCanvas.width, gameCanvas.height);
         drawRevealScreen(gameCanvas.clientWidth, gameCanvas.clientHeight);
+
         if (step.type === 'prompt') {
             progressBar.classList.add('hidden');
             const w = gameCanvas.clientWidth, h = gameCanvas.clientHeight;
@@ -246,15 +241,16 @@ document.addEventListener('DOMContentLoaded', () => {
             revealIsLocked = true;
             speak(step.content, () => {
                 setTimeout(() => {
-                    revealData.stepIndex++;
                     revealIsLocked = false;
-                    advanceReveal();
+                    if (myPlayerId === hostPlayerId) {
+                        ws.send(JSON.stringify({ type: 'next_reveal_step' }));
+                    }
                 }, 1200);
             });
         } else if (step.type === 'drawing') {
             progressBar.classList.remove('hidden');
             startAnimation(step.content, () => {
-                // Animation is complete, we now wait for a user click
+                // Animation is complete, we now wait for a host click
             });
         }
     }
@@ -280,20 +276,17 @@ document.addEventListener('DOMContentLoaded', () => {
             drawLine(pos.x - 0.01, pos.y, pos.x, pos.y, data.color, data.size);
         } else if ((clientGameState === 'PROMPTING' || clientGameState === 'DESCRIBING') && !textSubmitted && currentText) {
             const rect = gameCanvas.getBoundingClientRect(), w = rect.width, h = rect.height;
-            const btn = getSubmitButtonRect(w, h, h * 0.7 + 60 + 20);
+            const btnY = clientGameState === 'PROMPTING' ? h * 0.35 + 60 + 30 : h * 0.7 + 60 + 20;
+            const btn = getSubmitButtonRect(w, h, btnY);
             if (pos.x > btn.x && pos.x < btn.x + btn.w && pos.y > btn.y && pos.y < btn.y + btn.h) {
                 if(clientGameState === 'PROMPTING') ws.send(JSON.stringify({ type: 'submit_prompt', prompt: currentText }));
                 else if (clientGameState === 'DESCRIBING') ws.send(JSON.stringify({ type: 'submit_description', description: currentText }));
             }
         } else if (clientGameState === 'REVEAL') {
             if (revealIsLocked || animationState.isAnimating) return;
-            revealData.stepIndex++;
-            const album = revealData.albums[revealData.albumIndex];
-            if (revealData.stepIndex >= album.steps.length) {
-                revealData.albumIndex = (revealData.albumIndex + 1) % revealData.albums.length;
-                revealData.stepIndex = 0;
+            if (myPlayerId === hostPlayerId) {
+                ws.send(JSON.stringify({ type: 'next_reveal_step' }));
             }
-            advanceReveal();
         }
     });
     gameCanvas.addEventListener('mousemove', (e) => {
