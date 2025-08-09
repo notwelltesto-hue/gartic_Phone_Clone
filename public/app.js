@@ -45,6 +45,26 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Text-to-Speech ---
     function speak(text) { if ('speechSynthesis' in window && text) { speechSynthesis.cancel(); const utterance = new SpeechSynthesisUtterance(text); speechSynthesis.speak(utterance); } }
 
+    // --- Drawing Animation Engine ---
+    function animateDrawing(canvas, commands, onComplete) {
+        if (!commands) { if (onComplete) onComplete(); return; }
+        let index = 0;
+        const tempCtx = canvas.getContext('2d');
+        function drawFrame() {
+            if (index >= commands.length) { if (onComplete) onComplete(); return; }
+            // Draw a few commands per frame for speed
+            for (let i = 0; i < 3; i++) {
+                if (index >= commands.length) break;
+                const cmd = commands[index];
+                if (cmd.type === 'beginPath') { tempCtx.beginPath(); tempCtx.moveTo(cmd.x, cmd.y); tempCtx.lineTo(cmd.x, cmd.y); tempCtx.strokeStyle = cmd.color; tempCtx.lineWidth = cmd.size; tempCtx.lineCap = 'round'; tempCtx.stroke(); }
+                else if (cmd.type === 'draw') { tempCtx.beginPath(); tempCtx.moveTo(cmd.x0, cmd.y0); tempCtx.lineTo(cmd.x1, cmd.y1); tempCtx.strokeStyle = cmd.color; tempCtx.lineWidth = cmd.size; tempCtx.lineCap = 'round'; tempCtx.stroke(); }
+                index++;
+            }
+            requestAnimationFrame(drawFrame);
+        }
+        drawFrame();
+    }
+    
     // --- Rendering Logic ---
     function setCanvasSize() { const dpr = window.devicePixelRatio || 1; const rect = gameCanvas.getBoundingClientRect(); gameCanvas.width = rect.width * dpr; gameCanvas.height = rect.height * dpr; ctx.scale(dpr, dpr); }
     function renderGameCanvas() { requestAnimationFrame(() => { const w = gameCanvas.clientWidth, h = gameCanvas.clientHeight; if (!w || !h) return; ctx.clearRect(0, 0, w, h); switch (clientGameState) { case 'LOBBY': drawLobbyScreen(w, h); break; case 'PROMPTING': drawTextScreen(w, h, "Write something weird or funny!"); break; case 'DESCRIBING': drawTextScreen(w, h, "Describe what you see!"); break; case 'DRAWING': drawDrawingScreen(w, h); break; } }); }
@@ -77,7 +97,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function startTimer() { if (timerInterval) clearInterval(timerInterval); timerDisplay.classList.remove('hidden'); timerInterval = setInterval(() => { const remaining = Math.round((roundEndTime - Date.now())/1000); if (remaining >= 0) timerDisplay.textContent = remaining; else { stopTimer(); doneButton.classList.add('hidden'); } }, 1000); }
     function stopTimer() { if (timerInterval) clearInterval(timerInterval); timerDisplay.classList.add('hidden'); }
 
-    // --- NEW: Reveal UI Logic ---
+    // --- Reveal UI Logic ---
     function showCurrentRevealStep() {
         if (!allAlbums.length) return;
         const album = allAlbums[currentAlbumIndex];
@@ -100,16 +120,12 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (step.type === 'drawing') {
             stepDiv.classList.add('reveal-drawing');
             const canvas = document.createElement('canvas');
-            const tempCtx = canvas.getContext('2d');
             canvas.width = 500; canvas.height = 500; // A fixed size for the log
             stepDiv.appendChild(canvas);
-            (step.content || []).forEach(cmd => {
-                if (cmd.type === 'beginPath') tempCtx.moveTo(cmd.x, cmd.y);
-                tempCtx.beginPath(); tempCtx.moveTo(cmd.x0 || cmd.x, cmd.y0 || cmd.y); tempCtx.lineTo(cmd.x1 || cmd.x, cmd.y1 || cmd.y); tempCtx.strokeStyle = cmd.color; tempCtx.lineWidth = cmd.size; tempCtx.lineCap = 'round'; tempCtx.stroke();
-            });
+            animateDrawing(canvas, step.content);
         }
         revealContainer.appendChild(stepDiv);
-        stepDiv.scrollIntoView({ behavior: 'smooth' });
+        stepDiv.scrollIntoView({ behavior: 'smooth', block: 'end' });
     }
 
     // --- WebSocket Logic ---
@@ -123,6 +139,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 lobbyCodeDisplay.textContent = currentLobbyId;
                 clientGameState = 'LOBBY';
                 showView('game');
+                gameCanvas.classList.remove('hidden');
+                revealContainer.classList.add('hidden');
                 requestAnimationFrame(() => { setCanvasSize(); renderGameCanvas(); });
                 updatePlayerList();
                 break;
@@ -173,9 +191,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 showCurrentRevealStep();
                 break;
             case 'game_over':
-                wrapText(ctx, "That's all, folks!", gameCanvas.clientWidth/2, gameCanvas.clientHeight/2, 500, 40, 'bold 32px Nunito', '#424242');
+                clientGameState = 'LOBBY';
+                const gameOverDiv = document.createElement('div');
+                gameOverDiv.innerHTML = `<h3>That's all, folks!</h3><p>The host can start a new game.</p>`;
+                gameOverDiv.classList.add('reveal-step', 'reveal-prompt');
+                revealContainer.appendChild(gameOverDiv);
+                gameOverDiv.scrollIntoView({ behavior: 'smooth', block: 'end' });
+                // Host can start a new game
+                if (myPlayerId === hostPlayerId) {
+                    startGameBtn.textContent = "Play Again";
+                    startGameBtn.classList.remove('hidden');
+                }
                 break;
-            // Other cases remain the same
+            case 'player_joined': players[data.player.id] = { username: data.player.username }; updatePlayerList(); break;
+            case 'player_left': delete players[data.userId]; hostPlayerId = data.newHostId; updatePlayerList(); break;
+            case 'error': alert(`Server error: ${data.message}`); break;
         }
     }
     function connectWebSocket(username, lobbyId) { const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'; ws = new WebSocket(`${proto}//${window.location.host}/draw/${lobbyId}`); ws.onopen = () => ws.send(JSON.stringify({ type: 'join', username })); ws.onmessage = handleWebSocketMessage; ws.onclose = () => { alert('Connection lost.'); window.location.reload(); }; }
@@ -209,8 +239,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     });
-
-    // The reveal container is now a simple div, so clicks on it can be handled directly
+    
     revealContainer.addEventListener('click', () => {
         if (clientGameState === 'REVEAL' && myPlayerId === hostPlayerId) {
             ws.send(JSON.stringify({ type: 'next_reveal_step' }));
