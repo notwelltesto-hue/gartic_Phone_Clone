@@ -34,10 +34,8 @@ button:disabled { cursor: not-allowed; transform: none; box-shadow: none; backgr
 #drawing-toolbar input[type="range"] { cursor: pointer; }
 #timer-display { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.6); color: white; font-weight: 700; font-size: 24px; padding: 8px 20px; border-radius: 20px; z-index: 10; }
 #done-button { position: absolute; bottom: 120px; left: 50%; transform: translateX(-50%); background-color: #1a73e8; color: white; font-size: 18px; z-index: 10; }
-#reveal-progress-bar { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); width: 80%; height: 8px; background-color: #ccc; border-radius: 4px; overflow: hidden; z-index: 10; }
-#reveal-progress-fill { width: 0%; height: 100%; background-color: #1a73e8; transition: width 0.1s linear; }
 
-/* Styles for the new reveal container */
+/* Styles for the reveal container */
 #reveal-container {
     width: 100%;
     height: 100%;
@@ -45,6 +43,7 @@ button:disabled { cursor: not-allowed; transform: none; box-shadow: none; backgr
     background: #ffffff;
     border-radius: 12px;
     box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+    /* THIS IS THE FIX: Enable scrolling */
     overflow-y: auto;
     padding: 20px;
     box-sizing: border-box;
@@ -68,7 +67,8 @@ button:disabled { cursor: not-allowed; transform: none; box-shadow: none; backgr
     align-self: flex-end;
     padding: 10px;
 }
-.reveal-drawing canvas {
+/* A container for the drawing image to manage its size */
+.reveal-drawing-img {
     max-width: 100%;
     height: auto;
     display: block;
