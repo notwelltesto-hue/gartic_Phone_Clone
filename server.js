@@ -10,6 +10,8 @@ const wsInstance = expressWs(app);
 
 const lobbies = {};
 const ROUND_TIME = 60000; // 60 seconds
+const REVEAL_PROMPT_TIME = 5000; // 5 seconds
+const REVEAL_DRAWING_TIME = 8000; // 8 seconds
 
 // --- HTTP Routes ---
 app.post('/api/lobbies', (req, res) => {
@@ -64,8 +66,7 @@ app.ws('/draw/:lobbyId', (ws, req) => {
             handlePlayerJoin(lobby, ws, userId, data.username);
             return;
         }
-
-        if (!player) return; // All subsequent actions require a joined player
+        if (!player) return;
 
         switch(data.type) {
             case 'start_game':
@@ -81,7 +82,7 @@ app.ws('/draw/:lobbyId', (ws, req) => {
                 handleSubmitDescription(lobby, player, data.description, userId);
                 break;
             case 'next_reveal_step':
-                handleNextRevealStep(lobby, userId);
+                handleNextRevealStep(lobby, userId, true); // true means user-forced
                 break;
         }
     });
@@ -89,14 +90,14 @@ app.ws('/draw/:lobbyId', (ws, req) => {
     ws.on('close', () => handlePlayerLeave(lobby, userId));
 });
 
-// --- Player Connection Handlers ---
+// --- Player Connection ---
 function handlePlayerJoin(lobby, ws, userId, username) {
     if (lobby.gameState !== 'LOBBY') {
         ws.send(JSON.stringify({ type: 'error', message: 'Game has already started.' }));
         return ws.close();
     }
     lobby.players[userId] = { username, ws, isDone: false };
-    if (!lobby.hostId) lobby.hostId = userId; // First player is the host
+    if (!lobby.hostId) lobby.hostId = userId;
     ws.send(JSON.stringify({ type: 'initial_state', userId, hostId: lobby.hostId, players: getPlayerList(lobby) }));
     broadcast(lobby, { type: 'player_joined', player: { id: userId, username } }, ws);
 }
@@ -112,22 +113,20 @@ function handlePlayerLeave(lobby, userId) {
     if (Object.keys(lobby.players).length === 0) {
         if (lobby.roundTimer) clearTimeout(lobby.roundTimer);
         delete lobbies[lobbyId];
-        console.log(`Lobby ${lobbyId} has been deleted.`);
+        console.log(`Lobby ${lobbyId} deleted.`);
     } else {
         if (wasHost) {
             lobby.hostId = Object.keys(lobby.players)[0];
         }
-        // If a player leaves mid-round, it might complete the round
         checkRoundCompletion(lobby);
         broadcast(lobby, { type: 'player_left', userId, newHostId: lobby.hostId });
     }
 }
 
-// --- Game Logic Handlers ---
+// --- Game Logic ---
 function handleStartGame(lobby, userId) {
     if (userId === lobby.hostId && lobby.gameState === 'LOBBY' && Object.keys(lobby.players).length >= 2) {
         lobby.gameState = 'PROMPTING';
-        // Create and store a shuffled player order for the entire game
         lobby.shuffledPlayerIds = Object.keys(lobby.players).sort(() => 0.5 - Math.random());
         broadcast(lobby, { type: 'game_started' });
     }
@@ -167,7 +166,7 @@ function handleSubmitDescription(lobby, player, description, userId) {
 // --- Round & Reveal Management ---
 function checkRoundCompletion(lobby) {
     const playersInGame = Object.values(lobby.players);
-    if (playersInGame.length === 0) return; // Don't proceed if lobby is empty
+    if (playersInGame.length === 0) return;
 
     const allDone = playersInGame.every(p => p.isDone);
     
@@ -181,18 +180,16 @@ function checkRoundCompletion(lobby) {
 function startNextRound(lobby) {
     if (lobby.roundTimer) clearTimeout(lobby.roundTimer);
     Object.values(lobby.players).forEach(p => p.isDone = false);
-
     const numPlayers = Object.keys(lobby.players).length;
-    const isFirstRound = lobby.albums.length === 0;
-
-    // If the albums are full, the game is over
-    if (!isFirstRound && lobby.albums[0].steps.length >= numPlayers) {
+    
+    if (lobby.albums.length > 0 && lobby.albums[0].steps.length >= numPlayers) {
         startRevealPhase(lobby);
         return;
     }
 
-    // Alternate between drawing and describing
+    const isFirstRound = lobby.albums.length === 0;
     const nextStepIsDrawing = isFirstRound || lobby.albums[0].steps.length % 2 === 1;
+
     if (nextStepIsDrawing) {
         startDrawingRound(lobby);
     } else {
@@ -203,8 +200,6 @@ function startNextRound(lobby) {
 function startDrawingRound(lobby) {
     lobby.gameState = 'DRAWING';
     const playerIds = lobby.shuffledPlayerIds;
-
-    // On the very first round, create the albums from initial prompts
     if (lobby.albums.length === 0) {
         lobby.albums = playerIds.map(id => ({
             originalAuthor: id,
@@ -212,26 +207,20 @@ function startDrawingRound(lobby) {
             tasks: {}
         }));
     }
-
+    
     for (let i = 0; i < playerIds.length; i++) {
         const currentPlayerId = playerIds[i];
-        const assignedAlbumIndex = (i + 1) % playerIds.length; // Pass the album to the "next" player
+        const assignedAlbumIndex = (i + 1) % playerIds.length;
         const assignedAlbum = lobby.albums[assignedAlbumIndex];
-        
         assignedAlbum.tasks = {}; // Clear old tasks
         assignedAlbum.tasks[currentPlayerId] = 'draw';
-        
-        const task = {
-            type: 'new_task',
-            task: { type: 'draw', content: assignedAlbum.steps[assignedAlbum.steps.length - 1].content },
-            endTime: Date.now() + ROUND_TIME
-        };
+        const task = { type: 'new_task', task: { type: 'draw', content: assignedAlbum.steps[assignedAlbum.steps.length - 1].content }, endTime: Date.now() + ROUND_TIME };
         lobby.players[currentPlayerId].ws.send(JSON.stringify(task));
     }
-
+    
     lobby.roundTimer = setTimeout(() => {
         Object.entries(lobby.players).forEach(([id, player]) => {
-            if (!player.isDone) handleSubmitDrawing(lobby, player, [], id); // Submit empty drawing if timed out
+            if (!player.isDone) handleSubmitDrawing(lobby, player, [], id);
         });
     }, ROUND_TIME);
 }
@@ -239,26 +228,19 @@ function startDrawingRound(lobby) {
 function startDescribingRound(lobby) {
     lobby.gameState = 'DESCRIBING';
     const playerIds = lobby.shuffledPlayerIds;
-    
     for (let i = 0; i < playerIds.length; i++) {
         const currentPlayerId = playerIds[i];
         const assignedAlbumIndex = (i + 1) % playerIds.length;
         const assignedAlbum = lobby.albums[assignedAlbumIndex];
-        
         assignedAlbum.tasks = {}; // Clear old tasks
         assignedAlbum.tasks[currentPlayerId] = 'describe';
-
-        const task = {
-            type: 'new_task',
-            task: { type: 'describe', content: assignedAlbum.steps[assignedAlbum.steps.length - 1].content },
-            endTime: Date.now() + ROUND_TIME
-        };
+        const task = { type: 'new_task', task: { type: 'describe', content: assignedAlbum.steps[assignedAlbum.steps.length - 1].content }, endTime: Date.now() + ROUND_TIME };
         lobby.players[currentPlayerId].ws.send(JSON.stringify(task));
     }
     
     lobby.roundTimer = setTimeout(() => {
         Object.entries(lobby.players).forEach(([id, player]) => {
-            if (!player.isDone) handleSubmitDescription(lobby, player, "...", id); // Submit placeholder text if timed out
+            if (!player.isDone) handleSubmitDescription(lobby, player, "...", id);
         });
     }, ROUND_TIME);
 }
@@ -266,34 +248,44 @@ function startDescribingRound(lobby) {
 function startRevealPhase(lobby) {
     lobby.gameState = 'REVEAL';
     if (lobby.roundTimer) clearTimeout(lobby.roundTimer);
-    
-    // Set the initial reveal state on the server
-    lobby.revealState = { albumIndex: 0, stepIndex: 0 };
+    lobby.revealState = { albumIndex: -1, stepIndex: -1 }; // Start before the first item
     
     const finalAlbums = lobby.albums.map(album => ({
         originalAuthorName: lobby.players[album.originalAuthor]?.username || 'A mystery player',
         steps: album.steps
     }));
     
-    // First, tell clients all the album data
     broadcast(lobby, { type: 'reveal_all', albums: finalAlbums });
-    // Then, tell them which specific step to show first
-    broadcast(lobby, { type: 'update_reveal_step', ...lobby.revealState });
+    
+    // Kick off the first step
+    handleNextRevealStep(lobby, lobby.hostId, false);
 }
 
-function handleNextRevealStep(lobby, userId) {
+function handleNextRevealStep(lobby, userId, userForced = false) {
     if (lobby.gameState !== 'REVEAL' || userId !== lobby.hostId || !lobby.revealState) return;
+    
+    // If the user forced it, clear the old timer
+    if (userForced && lobby.roundTimer) {
+        clearTimeout(lobby.roundTimer);
+    }
     
     lobby.revealState.stepIndex++;
     
     const album = lobby.albums[lobby.revealState.albumIndex];
-    if (lobby.revealState.stepIndex >= album.steps.length) {
+    if (!album || lobby.revealState.stepIndex >= album.steps.length) {
         lobby.revealState.albumIndex = (lobby.revealState.albumIndex + 1) % lobby.albums.length;
         lobby.revealState.stepIndex = 0;
     }
     
-    // Broadcast the new step to all players
     broadcast(lobby, { type: 'update_reveal_step', ...lobby.revealState });
+    
+    const currentStep = lobby.albums[lobby.revealState.albumIndex].steps[lobby.revealState.stepIndex];
+    const delay = currentStep.type === 'prompt' ? REVEAL_PROMPT_TIME : REVEAL_DRAWING_TIME;
+    
+    // Set a timer to automatically advance to the next step
+    lobby.roundTimer = setTimeout(() => {
+        handleNextRevealStep(lobby, lobby.hostId, false);
+    }, delay);
 }
 
 // --- Helper Functions ---
