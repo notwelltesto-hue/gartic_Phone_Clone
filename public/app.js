@@ -9,8 +9,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let isDrawing = false, lastX = 0, lastY = 0;
     let roundEndTime = 0, timerInterval;
     let drawingHistory = [];
-    let allAlbums = []; // Stores the final album data sent by the server
-    let currentAlbumIndex = 0, currentStepIndex = 0; // State is now dictated by the server
+    let allAlbums = [];
+    let currentAlbumIndex = 0, currentStepIndex = 0;
     let animationState = { isAnimating: false, commands: [], index: 0, reqId: null };
     let lastBlinkTime = 0, cursorVisible = true;
 
@@ -47,19 +47,66 @@ document.addEventListener('DOMContentLoaded', () => {
     function speak(text) { if ('speechSynthesis' in window && text) { speechSynthesis.cancel(); const utterance = new SpeechSynthesisUtterance(text); speechSynthesis.speak(utterance); } }
 
     // --- Drawing Animation Engine ---
-    function animateDrawing(onComplete) { if (!animationState.isAnimating) return; const commands = animationState.commands; if (!commands || animationState.index >= commands.length) { animationState.isAnimating = false; if (onComplete) onComplete(); return; } for (let i = 0; i < 3; i++) { if (animationState.index >= commands.length) break; const cmd = commands[animationState.index]; if (cmd.type === 'beginPath') drawLine(cmd.x - 0.01, cmd.y, cmd.x, cmd.y, cmd.color, cmd.size); else if (cmd.type === 'draw') drawLine(cmd.x0, cmd.y0, cmd.x1, cmd.y1, cmd.color, cmd.size); animationState.index++; } progressFill.style.width = `${(animationState.index / commands.length) * 100}%`; animationState.reqId = requestAnimationFrame(() => animateDrawing(onComplete)); }
-    function startAnimation(commands, onComplete) { if (animationState.reqId) cancelAnimationFrame(animationState.reqId); ctx.clearRect(0,0,gameCanvas.width, gameCanvas.height); animationState = { isAnimating: true, commands: commands || [], index: 0, reqId: null }; animateDrawing(onComplete); }
+    function animateDrawing(onComplete) {
+        if (!animationState.isAnimating) return;
+        const commands = animationState.commands;
+        if (!commands || animationState.index >= commands.length) {
+            animationState.isAnimating = false;
+            if (onComplete) onComplete();
+            return;
+        }
+        for (let i = 0; i < 3; i++) {
+            if (animationState.index >= commands.length) break;
+            const cmd = commands[animationState.index];
+            if (cmd.type === 'beginPath') drawLine(cmd.x - 0.01, cmd.y, cmd.x, cmd.y, cmd.color, cmd.size);
+            else if (cmd.type === 'draw') drawLine(cmd.x0, cmd.y0, cmd.x1, cmd.y1, cmd.color, cmd.size);
+            animationState.index++;
+        }
+        progressFill.style.width = `${(animationState.index / commands.length) * 100}%`;
+        animationState.reqId = requestAnimationFrame(() => animateDrawing(onComplete));
+    }
+    function startAnimation(commands, onComplete) {
+        if (animationState.reqId) cancelAnimationFrame(animationState.reqId);
+        ctx.clearRect(0,0,gameCanvas.width, gameCanvas.height);
+        animationState = { isAnimating: true, commands: commands || [], index: 0, reqId: null };
+        animateDrawing(onComplete);
+    }
     
     // --- Rendering Logic ---
     function setCanvasSize() { const dpr = window.devicePixelRatio || 1; const rect = gameCanvas.getBoundingClientRect(); gameCanvas.width = rect.width * dpr; gameCanvas.height = rect.height * dpr; ctx.scale(dpr, dpr); }
-    function renderGameCanvas() { requestAnimationFrame(() => { const w = gameCanvas.clientWidth, h = gameCanvas.clientHeight; if (!w || !h) return; ctx.clearRect(0, 0, w, h); switch (clientGameState) { case 'LOBBY': drawLobbyScreen(w, h); break; case 'PROMPTING': drawTextScreen(w, h, "Write something weird or funny!"); break; case 'DESCRIBING': drawTextScreen(w, h, "Describe what you see!"); break; case 'DRAWING': drawDrawingScreen(w, h); break; case 'REVEAL': drawRevealScreen(w, h); break; } }); }
+    function renderGameCanvas() {
+        requestAnimationFrame(() => {
+            const w = gameCanvas.clientWidth;
+            const h = gameCanvas.clientHeight;
+            if (!w || !h) return;
+            ctx.clearRect(0, 0, w, h);
+            switch (clientGameState) {
+                case 'LOBBY': drawLobbyScreen(w, h); break;
+                case 'PROMPTING': drawTextScreen(w, h, "Write something weird or funny!"); break;
+                case 'DESCRIBING': drawTextScreen(w, h, "Describe what you see!"); break;
+                case 'DRAWING': drawDrawingScreen(w, h); break;
+                case 'REVEAL': drawRevealScreen(w, h); break;
+            }
+        });
+    }
     function wrapText(context, text, x, y, maxWidth, lineHeight, font, color, alignment = 'center') { context.font = font; context.fillStyle = color; context.textAlign = alignment; const words = (text || "").split(' '); let line = ''; let currentY = y; for (let n = 0; n < words.length; n++) { const testLine = line + words[n] + ' '; const metrics = context.measureText(testLine); if (metrics.width > maxWidth && n > 0) { context.fillText(line, x, currentY); line = words[n] + ' '; currentY += lineHeight; } else { line = testLine; } } context.fillText(line, x, currentY); }
     function drawLobbyScreen(w, h) { wrapText(ctx, 'Waiting for players...', w/2, h/2 - 20, w*0.8, 40, 'bold 32px Nunito', '#424242'); wrapText(ctx, 'The host will start the game.', w/2, h/2 + 30, w*0.8, 24, '20px Nunito', '#757575'); }
     function drawTextScreen(w, h, title) {
         wrapText(ctx, title, w/2, h*0.1, w*0.9, 36, 'bold 28px Nunito', '#424242');
-        if (clientGameState === 'DESCRIBING' && currentTask?.content) { (currentTask.content || []).forEach(cmd => { if (cmd.type === 'beginPath') drawLine(cmd.x-0.01, cmd.y, cmd.x, cmd.y, cmd.color, cmd.size); else if (cmd.type === 'draw') drawLine(cmd.x0, cmd.y0, cmd.x1, cmd.y1, cmd.color, cmd.size); }); }
+        if (clientGameState === 'DESCRIBING' && currentTask?.content) {
+            const drawingCommands = currentTask.content;
+            if (drawingCommands.length > 0) {
+                (drawingCommands || []).forEach(cmd => {
+                    if (cmd.type === 'beginPath') drawLine(cmd.x-0.01, cmd.y, cmd.x, cmd.y, cmd.color, cmd.size);
+                    else if (cmd.type === 'draw') drawLine(cmd.x0, cmd.y0, cmd.x1, cmd.y1, cmd.color, cmd.size);
+                });
+            } else {
+                 wrapText(ctx, "(The previous player drew nothing)", w/2, h/2 - 40, w*0.8, 24, 'italic 20px Nunito', '#757575');
+            }
+        }
         const inputBoxY = h * 0.7, inputBoxHeight = 60;
-        ctx.strokeStyle = '#bdbdbd'; ctx.lineWidth = 2; ctx.strokeRect(w*0.1, inputBoxY, w*0.8, inputBoxHeight);
+        ctx.strokeStyle = '#bdbdbd'; ctx.lineWidth = 2;
+        ctx.strokeRect(w*0.1, inputBoxY, w*0.8, inputBoxHeight);
         ctx.font = '24px Nunito'; ctx.fillStyle = '#212121'; ctx.textAlign = 'left';
         if (Date.now() - lastBlinkTime > 500) { cursorVisible = !cursorVisible; lastBlinkTime = Date.now(); }
         const cursor = (cursorVisible && !textSubmitted) ? '|' : '';
@@ -106,7 +153,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 doneButton.classList.add('hidden');
                 renderGameCanvas();
                 break;
-            case 'prompt_accepted': textSubmitted = true; renderGameCanvas(); break;
+            case 'prompt_accepted':
+                textSubmitted = true;
+                renderGameCanvas();
+                break;
             case 'new_task':
                 currentTask = data.task;
                 roundEndTime = data.endTime;
@@ -195,7 +245,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 else if (clientGameState === 'DESCRIBING') ws.send(JSON.stringify({ type: 'submit_description', description: currentText }));
             }
         } else if (clientGameState === 'REVEAL') {
-            // Only the host can advance the reveal, and only if it's not animating
             if (myPlayerId === hostPlayerId && !animationState.isAnimating) {
                 ws.send(JSON.stringify({ type: 'next_reveal_step' }));
             }
