@@ -16,6 +16,9 @@ const REVEAL_DRAWING_TIME = 8000; // 8 seconds
 // --- HTTP Routes ---
 app.post('/api/lobbies', (req, res) => {
     const { type } = req.body;
+    if (type !== 'public' && type !== 'private') {
+        return res.status(400).json({ message: 'Invalid lobby type.' });
+    }
     const lobbyId = short.generate();
     lobbies[lobbyId] = {
         type,
@@ -63,7 +66,8 @@ app.ws('/draw/:lobbyId', (ws, req) => {
             handlePlayerJoin(lobby, ws, userId, data.username);
             return;
         }
-        if (!player) return;
+
+        if (!player) return; // All subsequent actions require a joined player
 
         switch(data.type) {
             case 'start_game':
@@ -94,7 +98,7 @@ function handlePlayerJoin(lobby, ws, userId, username) {
         return ws.close();
     }
     lobby.players[userId] = { username, ws, isDone: false };
-    if (!lobby.hostId) lobby.hostId = userId;
+    if (!lobby.hostId) lobby.hostId = userId; // First player is the host
     ws.send(JSON.stringify({ type: 'initial_state', userId, hostId: lobby.hostId, players: getPlayerList(lobby) }));
     broadcast(lobby, { type: 'player_joined', player: { id: userId, username } }, ws);
 }
@@ -124,6 +128,7 @@ function handlePlayerLeave(lobby, userId) {
 function handleStartGame(lobby, userId) {
     if (userId === lobby.hostId && lobby.gameState === 'LOBBY' && Object.keys(lobby.players).length >= 2) {
         lobby.gameState = 'PROMPTING';
+        // Create and store a shuffled player order for the entire game
         lobby.shuffledPlayerIds = Object.keys(lobby.players).sort(() => 0.5 - Math.random());
         broadcast(lobby, { type: 'game_started' });
     }
@@ -276,8 +281,12 @@ function startRevealPhase(lobby) {
 
 function handleNextRevealStep(lobby, userId, userForced = false) {
     if (lobby.gameState !== 'REVEAL' || userId !== lobby.hostId || !lobby.revealState) return;
-    if (userForced && lobby.roundTimer) clearTimeout(lobby.roundTimer);
-
+    
+    // If the user forced it, clear the old timer
+    if (userForced && lobby.roundTimer) {
+        clearTimeout(lobby.roundTimer);
+    }
+    
     lobby.revealState.stepIndex++;
     
     const album = lobby.albums[lobby.revealState.albumIndex];
@@ -295,6 +304,7 @@ function handleNextRevealStep(lobby, userId, userForced = false) {
     const currentStep = lobby.albums[lobby.revealState.albumIndex].steps[lobby.revealState.stepIndex];
     const delay = currentStep.type === 'prompt' ? REVEAL_PROMPT_TIME : REVEAL_DRAWING_TIME;
     
+    // Set a timer to automatically advance to the next step
     lobby.roundTimer = setTimeout(() => {
         handleNextRevealStep(lobby, lobby.hostId, false);
     }, delay);
